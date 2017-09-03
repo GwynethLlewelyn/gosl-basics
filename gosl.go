@@ -129,15 +129,15 @@ func handlerQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// someone sent us an avatar name to look up, cool!
-	queryName := r.Form.Get("q")
+	queryName := r.Form.Get("name")
 	log.Debug("%s - Looking up '%s'", funcName(), queryName)
 	if queryName == "" {
-		 logErrHTTP(w, http.StatusNotFound, "Empty avatar name received; did you use ...?q=avatar_name")
+		 logErrHTTP(w, http.StatusNotFound, "Empty avatar name received; did you use ...?name=avatar_name")
 		 return
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Header().Set("Content-type", "text/plain; charset=utf-8")
-	fmt.Fprintf(w, "You called me with: %s", r.URL.Path[1:])
+	fmt.Fprintf(w, "You called me with: %s and your avatar name is %s\n", r.URL.Path[1:], queryName)
 }
 // handlerTouch associates avatar names with keys
 func handlerTouch(w http.ResponseWriter, r *http.Request) {
