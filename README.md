@@ -31,13 +31,13 @@ Then grab the two LSL scripts, `query.lsl` and `touch.lsl`. The first runs queri
 ## Configuration
 You can run the executable either as:
 
-  -port string
+	-port string
         Server port (default "3000")
-  -server
+	-server
         Run as server on port 3000
-  -shell
+	-shell
         Run as an interactive shell
-        
+     
 Basically, if you are running your own server (possibly at home!), you only need to run `gosl-basics -server`. You don't need to set up Apache or nginx or any other third-party software; `gosl-basics` is a fully standalone application and does not depend on anything.
 
 If you're using a shared web server, like the ones provided by [Dreamhost](https://dreamhost.com), then you will very likely want to run `gosl-basics` as a FastCGI application. Why? Well, Dreamhost's Terms of Service explicitly forbid any application to be run all the time (to conserve memory, CPU slices, and, well, open ports). Instead, they offer the ability to run applications as FastCGI applications instead (under their own Apache). This is actually a very cool interface (as opposed to the ancient, non-fast CGI...) allowing parts of the setup of the application to be done when it is called the first time, and then launch requests on demand. _If_ there is a _lot_ of traffic, the application will actually remain active in memory/CPU for a long time! If it only gets sporadic calls once in a while, well, in that case, the application gets removed from memory until someone calls the URL again. I have not tested exhaustively, and this will certainly depend from provider to provider, but Dreamhost seems to allow the application to remain active in memory and in the process space for 30-60 seconds.
