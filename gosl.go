@@ -94,8 +94,8 @@ func main() {
 	}
 	
 	// set up routing
-	http.HandleFunc("/", handlerQuery)
 	http.HandleFunc("/touch", handlerTouch)
+	http.HandleFunc("/", handlerQuery)
 	
 	if (*isServer) {
 		log.Info("Starting to run as web server on port " + *myPort)
