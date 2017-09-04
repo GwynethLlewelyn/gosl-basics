@@ -94,18 +94,18 @@ func main() {
 	}
 	
 	// set up routing
-	http.HandleFunc("/touch", handlerTouch)
-	http.HandleFunc("/", handlerQuery)
+	http.HandleFunc("/touch/", handlerTouch)
+	http.HandleFunc("/query/", handlerQuery)
 	
 	if (*isServer) {
 		log.Info("Starting to run as web server on port " + *myPort)
-		http.HandleFunc("/", handlerQuery)	
 		err := http.ListenAndServe(":" + *myPort, nil) // set listen port
 		checkErrPanic(err) // if it can't listen to all the above, then it has to abort anyway
 	} else {
 		// default is to run as FastCGI!
 		// works like a charm thanks to http://www.dav-muz.net/blog/2013/09/how-to-use-go-and-fastcgi/
 		log.Info("Starting to run as FastCGI")
+		log.Info("http.DefaultServeMux is", http.DefaultServeMux)
 		if err := fcgi.Serve(nil, nil); err != nil {
 			checkErrPanic(err)
 		}
