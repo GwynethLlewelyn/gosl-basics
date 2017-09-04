@@ -31,6 +31,7 @@ default
     
     timer()
     {
+        llWhisper(0, "No response from web services...");
         llResetScript();
     }
 
@@ -44,9 +45,10 @@ default
         if (request_id == http_request_id)
         {
             if (status == 200)
-                llInstantMessage(avatar, "Key is " + body);
+                llInstantMessage(avatar, body);
             else
                 llInstantMessage(avatar, "Error " + (string)status + ": " + body);
         }
+        llSetTimerEvent(0.0);
     }
 }
