@@ -141,14 +141,28 @@ func handlerQuery(w http.ResponseWriter, r *http.Request) {
 }
 // handlerTouch associates avatar names with keys
 func handlerTouch(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		logErrHTTP(w, http.StatusNotFound, "No avatar and/or UUID received")
+		return
+	}
 	// test first if this comes from Second Life or OpenSimulator
 	if r.Header.Get("X-Secondlife-Region") == "" {
 		logErrHTTP(w, http.StatusForbidden, "Sorry, this application only works inside Second Life.")
 		return
 	}
+	registerName := r.Form.Get("name")
+	registerKey := r.Form.Get("key")
+	if registerName == "" {
+		 logErrHTTP(w, http.StatusNotFound, "Empty avatar name received; did you use ...?name=avatar_name")
+		 return
+	}	
+	if registerKey == "" {
+		 logErrHTTP(w, http.StatusNotFound, "Empty avatar UUID key received; did you use ...?key=avatar_uuid")
+		 return
+	}	
 	w.WriteHeader(http.StatusOK)
 	w.Header().Set("Content-type", "text/plain; charset=utf-8")
-	fmt.Fprintf(w, "You called me with: %s", r.URL.Path[1:])
+	fmt.Fprintf(w, "You called me with: %s and your avatar name is '%s' and your UUID key is '%s'", registerName, registerKey, r.URL.Path[1:])
 }
 
 // NOTE(gwyneth):Auxiliary functions which I'm always using...
