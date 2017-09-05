@@ -8,7 +8,7 @@ import (
 	"github.com/dgraph-io/badger"
 	"github.com/op/go-logging"
 	"gopkg.in/natefinch/lumberjack.v2"
-	"io/ioutil"
+//	"io/ioutil"
 	"net/http"
 	"net/http/fcgi"
 	"os"
@@ -84,8 +84,10 @@ func main() {
 
 	log.Info("gosl started and logging is set up. Proceeding to test KV database.")
 	
+	var err error
 	Opt = badger.DefaultOptions
-	Opt.Dir, _ = ioutil.TempDir("", "goslkv")
+	Opt.Dir, err = os.Getwd()
+	checkErr(err)
 	Opt.ValueDir = Opt.Dir
 	kv, err := badger.NewKV(&Opt)
 	checkErr(err) // should probably panic
@@ -165,6 +167,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	}
 	name := r.Form.Get("name") // can be empty
 	key := r.Form.Get("key") // can be empty
+	compat := r.Form.Get("compat") // compatibility mode with W-Hat
 	messageToSL := "" // this is what we send back to SL - defined here due to scope issues.
 	if name != "" {
 		if key != "" {
@@ -177,7 +180,11 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		} else {
 			// we just received the name: look up its UUID key.
 			key = searchKV(name)
-			messageToSL += "UUID for '" + name + "' is: " + key
+			if compat == "false" {
+				messageToSL += "UUID for '" + name + "' is: " + key
+			} else { // empty also means true!
+				messageToSL += key		
+			}
 		}
 	} else if key != "" {
 		// in this scenario, we have the UUID key but no avatar name: do the equivalent of a llKey2Name
@@ -189,7 +196,11 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		}
 		name = string(item.Value())
 		kv.Close()
-		messageToSL += "Avatar name for " + key + "' is '" + name + "'"
+		if compat == "false" {
+			messageToSL += "Avatar name for " + key + "' is '" + name + "'"
+		} else { // empty also means true!
+			messageToSL += name		
+		}
 	} else {
 		// neither UUID key nor avatar received, this is an error
 		logErrHTTP(w, http.StatusNotFound, "Empty avatar name and UUID key received, cannot proceed")
