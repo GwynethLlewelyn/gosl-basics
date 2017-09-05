@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"github.com/dgraph-io/badger"
 	"github.com/op/go-logging"
 	"gopkg.in/natefinch/lumberjack.v2"
 	"net/http"
@@ -15,6 +16,8 @@ import (
 	"runtime"
 //	"strings"
 )
+
+const NullUUID = "00000000-0000-0000-0000-000000000000" // always useful when we deal with SL/OpenSimulator...
 
 // Logging setup	
 var log = logging.MustGetLogger("gosl")	// configuration for the go-logging logger, must be available everywhere
@@ -75,7 +78,22 @@ func main() {
 		logging.SetBackend(backendFileLeveled)	// FastCGI only logs to file
 	}
 
-	log.Info("gosl started and logging is set up. Proceeding to configuration.")
+	log.Info("gosl started and logging is set up. Proceeding to test KVdatabase.")
+	
+	opt := badger.DefaultOptions
+//	dir, _ := ioutil.TempDir("", "gosl.kv")
+//	opt.Dir = dir
+//	opt.ValueDir = dir
+	kv, err := badger.NewKV(&opt)
+	checkErr(err) // should probably panic
+
+	key := []byte(NullUUID)
+
+	kv.Set(key, []byte("Nobody Here"), 0x00)
+	fmt.Printf("SET %s \n", key)
+	defer kv.Close()
+	
+	log.Info("KV database seems fine.")
 	
 	if (*isShell) {
 		log.Info("Starting to run as interactive shell")
@@ -93,9 +111,9 @@ func main() {
 		// never leaves until Ctrl-C
 	}
 	
-	// set up routing
-	http.HandleFunc("/touch/", handlerTouch)
-	http.HandleFunc("/query/", handlerQuery)
+	// set up routing.
+	// NOTE(gwyneth): one function only because FastCGI seems to have problems with multiple handlers.
+	http.HandleFunc("/", handler)
 	
 	if (*isServer) {
 		log.Info("Starting to run as web server on port " + *myPort)
@@ -116,31 +134,13 @@ func main() {
 		flag.PrintDefaults()
 	}	
 }
-// handlerQuery deals with queries
-func handlerQuery(w http.ResponseWriter, r *http.Request) {
-	// get all parameters in array (error if no parameters are passed)
-	if err := r.ParseForm(); err != nil {
-		logErrHTTP(w, http.StatusNotFound, "No query string received")
-		return
-	}
-	// test first if this comes from Second Life or OpenSimulator
-	if r.Header.Get("X-Secondlife-Region") == "" {
-		logErrHTTP(w, http.StatusForbidden, "Sorry, this application only works inside Second Life.")
-		return
-	}
-	// someone sent us an avatar name to look up, cool!
-	queryName := r.Form.Get("name")
-	log.Debug("%s - Looking up '%s'", funcName(), queryName)
-	if queryName == "" {
-		 logErrHTTP(w, http.StatusNotFound, "Empty avatar name received; did you use ...?name=avatar_name")
-		 return
-	}
-	w.WriteHeader(http.StatusOK)
-	w.Header().Set("Content-type", "text/plain; charset=utf-8")
-	fmt.Fprintf(w, "You called me with: %s and your avatar name is %s\n", r.URL.Path[1:], queryName)
-}
-// handlerTouch associates avatar names with keys
-func handlerTouch(w http.ResponseWriter, r *http.Request) {
+
+// handler deals with incoming queries and/or associates avatar names with keys depending on parameters.
+// Basically we check if both an avatar name and a UUID key has been received: if yes, this means a new entry;
+//  if just the avatar name was received, it means looking up its key;
+//  if just the key was received, it means looking up the name (not necessary since llKey2Name does that, but it's just to illustrate);
+//  if nothing is received, then return an error
+func handler(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		logErrHTTP(w, http.StatusNotFound, "No avatar and/or UUID received")
 		return
@@ -150,19 +150,30 @@ func handlerTouch(w http.ResponseWriter, r *http.Request) {
 		logErrHTTP(w, http.StatusForbidden, "Sorry, this application only works inside Second Life.")
 		return
 	}
-	registerName := r.Form.Get("name")
-	registerKey := r.Form.Get("key")
-	if registerName == "" {
-		 logErrHTTP(w, http.StatusNotFound, "Empty avatar name received; did you use ...?name=avatar_name")
-		 return
-	}	
-	if registerKey == "" {
-		 logErrHTTP(w, http.StatusNotFound, "Empty avatar UUID key received; did you use ...?key=avatar_uuid")
-		 return
+	name := r.Form.Get("name") // can be empty
+	key := r.Form.Get("key") // can be empty
+	messageToSL := "" // this is what we send back to SL - defined here due to scope issues.
+	if name != "" {
+		if key != "" {
+			// we received both: add a new entry
+			messageToSL += "Added new entry for '" + name + "' which is: " + key
+			
+		} else {
+			// we just received the name: look up its UUID key.
+			messageToSL += "UUID for '" + name + "' is: " + key
+		}
+	} else if key != "" {
+		// in this scenario, we have the UUID key but no avatar name: do the equivalent of a llKey2Name 
+			messageToSL += "Avatar name for " + key + "' is '" + name + "'"
+
+	} else {
+		// neither UUID key nor avatar received, this is an error
+		logErrHTTP(w, http.StatusNotFound, "Empty avatar name and UUID key received, cannot proceed")
+		return	
 	}	
 	w.WriteHeader(http.StatusOK)
 	w.Header().Set("Content-type", "text/plain; charset=utf-8")
-	fmt.Fprintf(w, "You called me with: %s and your avatar name is '%s' and your UUID key is '%s'", registerName, registerKey, r.URL.Path[1:])
+	fmt.Fprintf(w, messageToSL)
 }
 
 // NOTE(gwyneth):Auxiliary functions which I'm always using...
