@@ -38,6 +38,7 @@ default
     listen(integer channel, string name, key id, string message)
     {
         http_request_id = llHTTPRequest(queryRequestURL + "?name=" + llEscapeURL(message), [], "");
+        llSetTimerEvent(60.0);
     }
 
     http_response(key request_id, integer status, list metadata, string body)

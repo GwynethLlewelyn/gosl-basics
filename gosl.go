@@ -8,6 +8,7 @@ import (
 	"github.com/dgraph-io/badger"
 	"github.com/op/go-logging"
 	"gopkg.in/natefinch/lumberjack.v2"
+	"io/ioutil"
 	"net/http"
 	"net/http/fcgi"
 	"os"
@@ -19,9 +20,12 @@ import (
 
 const NullUUID = "00000000-0000-0000-0000-000000000000" // always useful when we deal with SL/OpenSimulator...
 
-// Logging setup	
+// Logging setup.
 var log = logging.MustGetLogger("gosl")	// configuration for the go-logging logger, must be available everywhere
 var logFormat logging.Formatter
+
+// KV database setup.
+var Opt badger.Options
 
 /*
 			   .__		  
@@ -78,20 +82,24 @@ func main() {
 		logging.SetBackend(backendFileLeveled)	// FastCGI only logs to file
 	}
 
-	log.Info("gosl started and logging is set up. Proceeding to test KVdatabase.")
+	log.Info("gosl started and logging is set up. Proceeding to test KV database.")
 	
-	opt := badger.DefaultOptions
-//	dir, _ := ioutil.TempDir("", "gosl.kv")
-//	opt.Dir = dir
-//	opt.ValueDir = dir
-	kv, err := badger.NewKV(&opt)
+	Opt = badger.DefaultOptions
+	Opt.Dir, _ = ioutil.TempDir("", "goslkv")
+	Opt.ValueDir = Opt.Dir
+	kv, err := badger.NewKV(&Opt)
 	checkErr(err) // should probably panic
 
 	key := []byte(NullUUID)
 
 	kv.Set(key, []byte("Nobody Here"), 0x00)
-	fmt.Printf("SET %s \n", key)
-	defer kv.Close()
+	log.Debugf("SET %s\n", key)
+	var item badger.KVItem
+	if err := kv.Get(key, &item); err != nil {
+    	log.Errorf("Error while getting key: %q", key)
+	}
+	log.Debugf("GET %s %s\n", key, item.Value())
+	kv.Close()
 	
 	log.Info("KV database seems fine.")
 	
@@ -100,13 +108,18 @@ func main() {
 		reader := bufio.NewReader(os.Stdin)
 		fmt.Println("Ctrl-C to quit.")
 		var err error	// to avoid assigning text in a different scope (this is a bit awkward, but that's the problem with bi-assignment)
-		var text string
+		var avatarName, avatarKey string
 		for {
 			// Prompt and read			
 			fmt.Print("Enter avatar name: ")
-			text, err = reader.ReadString('\n')
+			avatarName, err = reader.ReadString('\n')
 			checkErr(err)
-			fmt.Println("You typed:", text, "which has", len(text), "character(s).")
+			avatarKey = searchKV(avatarName)
+			if avatarKey != NullUUID {
+				fmt.Println("You typed:", avatarName, "which has UUID:", avatarKey)	
+			} else {
+				fmt.Println("Sorry, unknown avatar ", avatarName)
+			}	
 		}
 		// never leaves until Ctrl-C
 	}
@@ -156,16 +169,27 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	if name != "" {
 		if key != "" {
 			// we received both: add a new entry
-			messageToSL += "Added new entry for '" + name + "' which is: " + key
-			
+			kv, err := badger.NewKV(&Opt)
+			checkErrPanic(err) // should probably panic		
+			kv.Set([]byte(key), []byte(name), 0x00)
+			kv.Close()
+			messageToSL += "Added new entry for '" + name + "' which is: " + key			
 		} else {
 			// we just received the name: look up its UUID key.
+			key = searchKV(name)
 			messageToSL += "UUID for '" + name + "' is: " + key
 		}
 	} else if key != "" {
-		// in this scenario, we have the UUID key but no avatar name: do the equivalent of a llKey2Name 
-			messageToSL += "Avatar name for " + key + "' is '" + name + "'"
-
+		// in this scenario, we have the UUID key but no avatar name: do the equivalent of a llKey2Name
+		kv, err := badger.NewKV(&Opt)
+		checkErrPanic(err) // should we send the error back to user?
+		var item badger.KVItem
+		if err := kv.Get([]byte(key), &item); err != nil {
+    		log.Errorf("Error while getting key: %q", key)
+		}
+		name = string(item.Value())
+		kv.Close()
+		messageToSL += "Avatar name for " + key + "' is '" + name + "'"
 	} else {
 		// neither UUID key nor avatar received, this is an error
 		logErrHTTP(w, http.StatusNotFound, "Empty avatar name and UUID key received, cannot proceed")
@@ -174,6 +198,33 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Header().Set("Content-type", "text/plain; charset=utf-8")
 	fmt.Fprintf(w, messageToSL)
+}
+
+// searchKV searches the KV database for an avatar name. The other operations are trivial.
+func searchKV(avatarName string) string {
+	kv, err := badger.NewKV(&Opt)
+	checkErr(err) // should probably panic
+
+	itOpt := badger.DefaultIteratorOptions
+	itr := kv.NewIterator(itOpt)
+
+	found := NullUUID
+	for itr.Rewind(); itr.Valid(); itr.Next() {
+		item := itr.Item()
+		key := item.Key()
+		val := item.Value()	// This could block while value is fetched from value log.
+	                    	// For key only iteration, set opt.FetchValues to false, and don't call
+							// item.Value().
+		if avatarName == string(val) {
+			found = string(key)
+			break
+		} 						 
+		// Remember that both key, val would become invalid in the next iteration of the loop.
+		// So, if you need access to them outside, copy them or parse them.
+	}
+	itr.Close()
+	kv.Close()
+	return found
 }
 
 // NOTE(gwyneth):Auxiliary functions which I'm always using...
