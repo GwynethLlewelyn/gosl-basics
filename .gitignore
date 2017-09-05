@@ -1,1 +1,4 @@
 gosl.log
+*.vlog
+*.sst
+MANIFEST
