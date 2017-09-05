@@ -24,7 +24,15 @@ Requirements:
 - You need to have [Go](https://golang.org) installed and configured properly
 - Your computer/server needs to have a publicly accessible IP (and set it up with a **dynamic DNS provider** such as [no-ip.com](https://www.noip.com/remote-access)); you _can_ run it from home if you wish
 
-Taking that into account, all you need now to do is `go get git.gwynethllewelyn.net/GwynethLlewelyn/gosl-basics.git` and you _ought_ to have a binary executable file in `~/go/bin` called `gosl-basics`. Just run it!
+Taking that into account, all you need now to do is add the external packages used by this project:
+```
+go get github.com/dgraph-io/badger
+go get github.com/op/go-logging
+go get gopkg.in/natefinch/lumberjack.v2
+```
+which are, respectively, a very fast name/key database; a powerful logging system; and a way to rotate logs (a lumberjack... chops down logs... get it? :) Aye, Gophers have a sense of humour).
+
+Finally, `go get git.gwynethllewelyn.net/GwynethLlewelyn/gosl-basics.git` and you _ought_ to have a binary executable file in `~/go/bin` called `gosl-basics`. Just run it!
 
 Then grab the two LSL scripts, `query.lsl` and `touch.lsl`. The first runs queries: you touch to activate it, write the name of an avatar in chat using '/5 firstname lastname', and it replies with the avatar key (after a timeout, the script resets, giving another person a chance to try it out). The second script is to be placed on anything touchable to grab avatar names and keys and send it to your own database. You can, of course, use other methods to grab those; as an exercise, use a Sensor instead, or — even better and consuming much less resources — use a transparent, phantom prim across a place where people have no choice but to go through, and register names & keys as avatars 'bump' into that prim! There are more exotic alternatives, such as registering the name & key when an avatar sits on the prim; or using a llCastRay to figure out if there is anybody nearby. Lots of possibilities! :-) 
 
@@ -44,6 +52,14 @@ If you're using a shared web server, like the ones provided by [Dreamhost](https
 
 Remember to set your URLs on each of the two LSL scripts!
 
-For the standalone server: this will be something like `http://your.server.name:3000/` for `query.lsl` and `http://your.server.name:3000/touch` for `touch.lsl`. 
+For the standalone server: this will be something like `http://your.server.name:3000/`.
 
-For FastCGI: If your base URL (i.e. pointing to the directory where you have installed `gosl-basics`) is something like `http://your.hosted-server.name/examples` then your URLs will be something like `http://your.hosted-server.name/examples/gosl-basics` and `http://your.hosted-server.name/examples/gosl-basics/touch`. Some providers might force you to add an extension like `.fcgi`, meaning that you will have to remember to add that explicitly every time you compile the application again (or just use a [Makefile](https://www.devroom.io/2015/10/03/a-makefile-for-golang-cli-tools/) for that!).
+For FastCGI: If your base URL (i.e. pointing to the directory where you have installed `gosl-basics`) is something like `http://your.hosted-server.name/examples` then your URLs will be something like `http://your.hosted-server.name/examples/gosl-basics`. Some providers might force you to add an extension like `.fcgi`, meaning that you will have to remember to add that explicitly every time you compile the application again (or just use a [Makefile](https://www.devroom.io/2015/10/03/a-makefile-for-golang-cli-tools/) for that!).
+
+## Limitations
+
+I found that somehow the standard FastCGI package in Go seems to be limited to just one handler on the path router, so I took that into account and simply tried to figure out what was requested based on the valid parameters (`name` and `key`) passed via GET or POST. A more complex real-world example might require a much more sophisticated router; possibly the [Gorilla](https://github.com/gorilla/mux) router would handle FastCGI better, I don't know.
+
+Note that the current version is not meant as a direct replacement for [W-Hat's name2key](http://w-hat.com/#name2key). You _can_ do that, it just changing the code to make sure that what is returned by the handler function is exactly what is expected (namely, just the key UUID as opposed to a nice message). And then you can load one of the avatar/key databases and have your own replacement solution. I might make some tweaks on the parameters so that, by default, you get a clone of W-Hat's behaviour (so you could replace your scripts using that), but with an extra parameter, you get nicely formatted replies for testing purposes. Hmm. Wait for the next version :-)
+
+Also note that this will work on OpenSimulator grids as well: UUIDs are supposed to be universal and unique, so each avatar on all OpenSimulator grids out there should have their own UUIDs, different from the ones in Second Life®, and you are able to freely mix them together. A better alternative (as an exercise to the user!) would be to capture the grid name from the headers and store it with the avatar name/key pair; in that scenario, you could change the web service so that it only replies with name/key pairs from the grid it has been called from (but storing them all on the same database, with exactly the same interface). This is certainly possible!
