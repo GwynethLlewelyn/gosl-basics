@@ -3,11 +3,14 @@ package main
 
 import (
 	"bufio"
+	"compress/bzip2"
+	"encoding/csv"
 	"flag"
 	"fmt"
 	"github.com/dgraph-io/badger"
 	"github.com/op/go-logging"
 	"gopkg.in/natefinch/lumberjack.v2"
+	"io"
 //	"io/ioutil"
 	"net/http"
 	"net/http/fcgi"
@@ -28,12 +31,12 @@ var logFormat logging.Formatter
 var Opt badger.Options
 
 /*
-			   .__		  
+				  .__			 
   _____ _____  |__| ____  
- /	   \\__	 \ |  |/	\ 
-|  Y Y	\/ __ \|  |	  |	 \
+ /		  \\__	 \ |	 |/	\ 
+|  Y Y	\/ __ \|	 |		 |	 \
 |__|_|	(____  /__|___|	 /
-	  \/	 \/		   \/ 
+	  \/	 \/			  \/ 
 */
  
 // main() starts here.
@@ -42,6 +45,7 @@ func main() {
 	var myPort	 = flag.String("port", "3000", "Server port")
 	var isServer = flag.Bool("server", false, "Run as server on port " + *myPort)
 	var isShell  = flag.Bool("shell", false, "Run as an interactive shell")
+	var importFilename = flag.String("import", "", "(experimental) Import database from W-Hat")
 	// default is FastCGI
 
 	flag.Parse()
@@ -98,12 +102,18 @@ func main() {
 	log.Debugf("SET %s\n", key)
 	var item badger.KVItem
 	if err := kv.Get(key, &item); err != nil {
-    	log.Errorf("Error while getting key: %q", key)
+		log.Errorf("Error while getting key: %q", key)
 	}
 	log.Debugf("GET %s %s\n", key, item.Value())
 	kv.Close()
 	
 	log.Info("KV database seems fine.")
+	
+	if *importFilename != "" {
+		log.Info("Attempting to import", *importFilename, "...")
+		importDatabase(*importFilename)
+		log.Info("Database finished import.")
+	}
 	
 	if (*isShell) {
 		log.Info("Starting to run as interactive shell")
@@ -152,9 +162,9 @@ func main() {
 
 // handler deals with incoming queries and/or associates avatar names with keys depending on parameters.
 // Basically we check if both an avatar name and a UUID key has been received: if yes, this means a new entry;
-//  if just the avatar name was received, it means looking up its key;
-//  if just the key was received, it means looking up the name (not necessary since llKey2Name does that, but it's just to illustrate);
-//  if nothing is received, then return an error
+//	if just the avatar name was received, it means looking up its key;
+//	if just the key was received, it means looking up the name (not necessary since llKey2Name does that, but it's just to illustrate);
+//	if nothing is received, then return an error
 func handler(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		logErrHTTP(w, http.StatusNotFound, "No avatar and/or UUID received")
@@ -192,7 +202,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		checkErrPanic(err) // should we send the error back to user?
 		var item badger.KVItem
 		if err := kv.Get([]byte(key), &item); err != nil {
-    		log.Errorf("Error while getting key: %q", key)
+			log.Errorf("Error while getting key: %q", key)
 		}
 		name = string(item.Value())
 		kv.Close()
@@ -224,7 +234,7 @@ func searchKV(avatarName string) string {
 		item := itr.Item()
 		key := item.Key()
 		val := item.Value()	// This could block while value is fetched from value log.
-	                    	// For key only iteration, set opt.FetchValues to false, and don't call
+						 	// For key only iteration, set opt.FetchValues to false, and don't call
 							// item.Value().
 		if avatarName == string(val) {
 			found = string(key)
@@ -236,6 +246,40 @@ func searchKV(avatarName string) string {
 	itr.Close()
 	kv.Close()
 	return found
+}
+
+// importDatabase is essentially reading a bzip2'ed CSV file with UUID,AvatarName downloaded from http://w-hat.com/#name2key .
+//	One could theoretically set a cron job to get this file, save it on disk periodically, and keep the database up-to-date
+//	see https://stackoverflow.com/questions/24673335/how-do-i-read-a-gzipped-csv-file for the actual usage of these complicated things!
+func importDatabase(filename string) {
+	f, err := os.Open(filename)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+	gr := bzip2.NewReader(f) // open bzip2 reader
+	cr := csv.NewReader(gr)  // open csv reader and feed the bzip2 reader into it
+	limit := 0
+	kv, err := badger.NewKV(&Opt)
+	checkErrPanic(err) // should probably panic		
+	defer kv.Close()
+
+	for {
+		record, err := cr.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			log.Fatal(err)
+		}
+		//fmt.Println("Key:", record[0], "Name:", record[1])
+		kv.Set([]byte(record[0]), []byte(record[1]), 0x00)
+
+		limit++
+		if limit % 100000 == 0{
+			log.Info("Read", limit, "records (or thereabouts)")
+		}
+	}
 }
 
 // NOTE(gwyneth):Auxiliary functions which I'm always using...
