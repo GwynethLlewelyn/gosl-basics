@@ -65,7 +65,11 @@ For FastCGI: If your base URL (i.e. pointing to the directory where you have ins
 
 Note that the first time ever the application runs, it will check if the database directory exists, and if not, it will attempt to create it (and panic if it cannot create it, due to permissions — basically, if it can't create a directory, it won't be able to create the database files either). You can define a different location for the database; this might be important when using FastCGI on a shared server, because you might wish to use a private area of your web server, so that it cannot be directly accessed.
 
-The `-nomemory` switch may seem weird, but in some scenarios, like shared servers with FastCGI, the actual memory consumption may be limited, so this attempts to reduce the amount of necessary memory (things will run much slower, though!)
+The `-shell` switch is mostly meant for debugging, namely, to figure out if the database was loaded correctly (see below) and that you can query for avatar names and/or UUIDs to see if they're in the database. Remember to run from the same place where the database resides (or pass the appropriate `-dir`command). Also, you will get extra debugging messages.
+
+The `-nomemory` switch may seem weird, but in some scenarios, like shared servers with FastCGI, the actual memory consumption may be limited, so this attempts to reduce the amount of necessary memory (things will run much slower, though; the good news is that there is _some_ caching).
+
+See below for instructions for importing CSV bzip2'ed databases using `-import`. The CSV file format is one pair **UUID,Avatar Name** per line, and all of that bzip2'ed. 
 
 ## Limitations
 
@@ -78,3 +82,5 @@ To actually _use_ the W-Hat database, you need to download it first and import i
 Importing the whole W-Hat database, which has a bit over 9 million entries, took on my Mac 3 minutes and 5 seconds. Aye, that's quite a long time. On a shared server, it can be even longer.
 
 This also works for OpenSimulator grids and you can use the same scripts and database if you wish. Currently, the database stores an extra field with UUID, which is usually set to the name of the grid. Linden Lab sets these as 'Production' and 'Testing' respectively; other grid operators may use other names. There is no guarantee that every grid operator has configured their database with an unique name. Also, because of the way the key/value database works, it _assumes_ that all avatar names are unique across _all_ grids, which may not be true: only UUIDs are guaranteed to be unique. The reason why this was implemented this way was that I wanted _very fast_ name2key searches, while I'm not worried about very slow key2name searches, since those are implemented in LSL anyway. To make sure that you can have many avatars with the same name but different UUIDs, well, it would require a different kind of database. Also, what should a function return for an avatar with three different UUIDs? You can see the problem there. Therefore I kept it simple, but be mindful of this limitation.
+
+Oh, and with 9 million entries, this is slow.

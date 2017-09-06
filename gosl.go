@@ -18,7 +18,7 @@ import (
 	"net/http/fcgi"
 	"os"
 	"path/filepath"
-//	"regexp"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -144,18 +144,25 @@ func main() {
 		reader := bufio.NewReader(os.Stdin)
 		fmt.Println("Ctrl-C to quit.")
 		var err error	// to avoid assigning text in a different scope (this is a bit awkward, but that's the problem with bi-assignment)
-		var avatarName, avatarKey, gridName string
+		var checkInput, avatarName, avatarKey, gridName string
 		for {
 			// Prompt and read			
-			fmt.Print("Enter avatar name: ")
-			avatarName, err = reader.ReadString('\n')
+			fmt.Print("Enter avatar name or UUID: ")
+			checkInput, err = reader.ReadString('\n')
 			checkErr(err)
-			avatarName = strings.TrimRight(avatarName, "\r\n")
-			avatarKey, gridName = searchKVname(avatarName)
-			if avatarKey != NullUUID {
-				fmt.Println("You typed:", avatarName, "which has UUID:", avatarKey, "and comes from grid:", gridName)	
+			checkInput = strings.TrimRight(checkInput, "\r\n")
+			// fmt.Printf("Ok, got %s length is %d and UUID is %v\n", checkInput, len(checkInput), isValidUUID(checkInput))
+			if (len(checkInput) == 36) && isValidUUID(checkInput) {
+				avatarName, gridName = searchKVUUID(checkInput)
+				avatarKey = checkInput
+			} else {				
+				avatarKey, gridName = searchKVname(checkInput)
+				avatarName = checkInput
+			}
+			if avatarName != NullUUID && avatarKey != NullUUID {
+				fmt.Println(avatarName, "which has UUID:", avatarKey, "comes from grid:", gridName)	
 			} else {
-				fmt.Println("Sorry, unknown avatar ", avatarName)
+				fmt.Println("Sorry, unknown input", checkInput)
 			}	
 		}
 		// never leaves until Ctrl-C
@@ -381,3 +388,9 @@ func funcName() string {
 	return runtime.FuncForPC(pc).Name()
 }
 
+// isValidUUID checks if the UUID is valid.
+// Thanks to Patrick D'Appollonio https://stackoverflow.com/questions/25051675/how-to-validate-uuid-v4-in-go
+func isValidUUID(uuid string) bool {
+    r := regexp.MustCompile("^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-4[a-fA-F0-9]{3}-[8|9|aA|bB][a-fA-F0-9]{3}-[a-fA-F0-9]{12}$")
+    return r.MatchString(uuid)
+}
