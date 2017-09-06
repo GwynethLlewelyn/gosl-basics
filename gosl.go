@@ -18,7 +18,7 @@ import (
 	"path/filepath"
 //	"regexp"
 	"runtime"
-//	"strings"
+	"strings"
 )
 
 const NullUUID = "00000000-0000-0000-0000-000000000000" // always useful when we deal with SL/OpenSimulator...
@@ -126,6 +126,7 @@ func main() {
 			fmt.Print("Enter avatar name: ")
 			avatarName, err = reader.ReadString('\n')
 			checkErr(err)
+			avatarName = strings.TrimRight(avatarName, "\r\n")
 			avatarKey = searchKV(avatarName)
 			if avatarKey != NullUUID {
 				fmt.Println("You typed:", avatarName, "which has UUID:", avatarKey)	
@@ -230,19 +231,22 @@ func searchKV(avatarName string) string {
 	itr := kv.NewIterator(itOpt)
 
 	found := NullUUID
+	checks := 0
 	for itr.Rewind(); itr.Valid(); itr.Next() {
 		item := itr.Item()
 		key := item.Key()
 		val := item.Value()	// This could block while value is fetched from value log.
 						 	// For key only iteration, set opt.FetchValues to false, and don't call
 							// item.Value().
-		if avatarName == string(val) {
+		checks++	//Just to see how many
+		if avatarName == string(val) {	// are these pointers?
 			found = string(key)
 			break
 		} 						 
 		// Remember that both key, val would become invalid in the next iteration of the loop.
 		// So, if you need access to them outside, copy them or parse them.
 	}
+	log.Debugf("Made %d checks for '%s'", checks, avatarName)
 	itr.Close()
 	kv.Close()
 	return found
@@ -276,7 +280,7 @@ func importDatabase(filename string) {
 		kv.Set([]byte(record[0]), []byte(record[1]), 0x00)
 
 		limit++
-		if limit % 100000 == 0{
+		if limit % 100000 == 0 {
 			log.Info("Read", limit, "records (or thereabouts)")
 		}
 	}
