@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"compress/bzip2"
 	"encoding/csv"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/dgraph-io/badger"
@@ -19,6 +20,7 @@ import (
 //	"regexp"
 	"runtime"
 	"strings"
+	"time"
 )
 
 const NullUUID = "00000000-0000-0000-0000-000000000000" // always useful when we deal with SL/OpenSimulator...
@@ -27,8 +29,14 @@ const NullUUID = "00000000-0000-0000-0000-000000000000" // always useful when we
 var log = logging.MustGetLogger("gosl")	// configuration for the go-logging logger, must be available everywhere
 var logFormat logging.Formatter
 
-// KV database setup.
+// Opt is used for KV database setup.
 var Opt badger.Options
+
+// AvatarUUID is the type that we store in the database; we keep a record from which grid it came from.
+type avatarUUID struct {
+	UUID string		// needs to be capitalised for JSON marshalling (it has to do with the way it works)
+	Grid string
+} 
 
 /*
 				  .__			 
@@ -43,9 +51,10 @@ var Opt badger.Options
 func main() {
 	// Flag setup
 	var myPort	 = flag.String("port", "3000", "Server port")
+	var myDir	 = flag.String("dir", "slkvdb", "Directory where database files are stored")
 	var isServer = flag.Bool("server", false, "Run as server on port " + *myPort)
 	var isShell  = flag.Bool("shell", false, "Run as an interactive shell")
-	var importFilename = flag.String("import", "", "(experimental) Import database from W-Hat")
+	var importFilename = flag.String("import", "", "Import database from W-Hat (use the csv.bz2 version)")
 	// default is FastCGI
 
 	flag.Parse()
@@ -87,25 +96,31 @@ func main() {
 	}
 
 	log.Info("gosl started and logging is set up. Proceeding to test KV database.")
-	
+	const testAvatarName = "Nobody Here"
 	var err error
 	Opt = badger.DefaultOptions
-	Opt.Dir, err = os.Getwd()
-	checkErr(err)
+	// Check if this directory actually exists; if not, create it. Panic if something wrong happens (we cannot proceed without a valid directory for the database to be written
+	if stat, err := os.Stat(*myDir); err == nil && stat.IsDir() {
+		// path is a valid directory
+		log.Debugf("Valid directory: %s\n", *myDir)
+	} else {
+		// try to create directory
+		err = os.Mkdir(*myDir, 0700)
+		checkErrPanic(err) // cannot make directory, panic and exit logging what went wrong
+		log.Debugf("Created new directory: %s\n", *myDir)		
+	}
+	Opt.Dir = *myDir
 	Opt.ValueDir = Opt.Dir
 	kv, err := badger.NewKV(&Opt)
-	checkErr(err) // should probably panic
-
-	key := []byte(NullUUID)
-
-	kv.Set(key, []byte("Nobody Here"), 0x00)
-	log.Debugf("SET %s\n", key)
-	var item badger.KVItem
-	if err := kv.Get(key, &item); err != nil {
-		log.Errorf("Error while getting key: %q", key)
-	}
-	log.Debugf("GET %s %s\n", key, item.Value())
+	checkErrPanic(err) // should probably panic, cannot prep new database
+	var testValue = avatarUUID{ NullUUID, "all grids" }
+	jsonTestValue, err := json.Marshal(testValue)
+	checkErrPanic(err) // something went VERY wrong
+	kv.Set([]byte(testAvatarName), jsonTestValue, 0x00)
+	log.Debugf("SET %+v (json: %v)\n", testValue, string(jsonTestValue))
 	kv.Close()
+	key, grid := searchKVname(testAvatarName)
+	log.Debugf("GET '%s' returned '%s' [grid '%s']\n", testAvatarName, key, grid)
 	
 	log.Info("KV database seems fine.")
 	
@@ -120,16 +135,16 @@ func main() {
 		reader := bufio.NewReader(os.Stdin)
 		fmt.Println("Ctrl-C to quit.")
 		var err error	// to avoid assigning text in a different scope (this is a bit awkward, but that's the problem with bi-assignment)
-		var avatarName, avatarKey string
+		var avatarName, avatarKey, gridName string
 		for {
 			// Prompt and read			
 			fmt.Print("Enter avatar name: ")
 			avatarName, err = reader.ReadString('\n')
 			checkErr(err)
 			avatarName = strings.TrimRight(avatarName, "\r\n")
-			avatarKey = searchKV(avatarName)
+			avatarKey, gridName = searchKVname(avatarName)
 			if avatarKey != NullUUID {
-				fmt.Println("You typed:", avatarName, "which has UUID:", avatarKey)	
+				fmt.Println("You typed:", avatarName, "which has UUID:", avatarKey, "and comes from grid:", gridName)	
 			} else {
 				fmt.Println("Sorry, unknown avatar ", avatarName)
 			}	
@@ -179,36 +194,34 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	name := r.Form.Get("name") // can be empty
 	key := r.Form.Get("key") // can be empty
 	compat := r.Form.Get("compat") // compatibility mode with W-Hat
+	var valueToInsert avatarUUID
 	messageToSL := "" // this is what we send back to SL - defined here due to scope issues.
 	if name != "" {
 		if key != "" {
 			// we received both: add a new entry
 			kv, err := badger.NewKV(&Opt)
-			checkErrPanic(err) // should probably panic		
-			kv.Set([]byte(key), []byte(name), 0x00)
+			checkErrPanic(err) // should probably panic
+			valueToInsert.UUID = key
+			valueToInsert.Grid = r.Header.Get("X-Secondlife-Shard")
+			jsonValueToInsert, err := json.Marshal(valueToInsert)
+			checkErr(err)
+			kv.Set([]byte(name), jsonValueToInsert, 0x00)
 			kv.Close()
-			messageToSL += "Added new entry for '" + name + "' which is: " + key			
+			messageToSL += "Added new entry for '" + name + "' which is: " + valueToInsert.UUID + " from grid: '" + valueToInsert.Grid + "'"
 		} else {
-			// we just received the name: look up its UUID key.
-			key = searchKV(name)
+			// we received a name: look up its UUID key and grid.
+			key, grid := searchKVname(name)
 			if compat == "false" {
-				messageToSL += "UUID for '" + name + "' is: " + key
+				messageToSL += "UUID for '" + name + "' is: " + key + " from grid: '" + grid + "'"
 			} else { // empty also means true!
 				messageToSL += key		
 			}
 		}
 	} else if key != "" {
-		// in this scenario, we have the UUID key but no avatar name: do the equivalent of a llKey2Name
-		kv, err := badger.NewKV(&Opt)
-		checkErrPanic(err) // should we send the error back to user?
-		var item badger.KVItem
-		if err := kv.Get([]byte(key), &item); err != nil {
-			log.Errorf("Error while getting key: %q", key)
-		}
-		name = string(item.Value())
-		kv.Close()
+		// in this scenario, we have the UUID key but no avatar name: do the equivalent of a llKey2Name (slow)
+		name, grid := searchKVUUID(key)
 		if compat == "false" {
-			messageToSL += "Avatar name for " + key + "' is '" + name + "'"
+			messageToSL += "Avatar name for " + key + "' is '" + name + "' on grid: '" + grid + "'"
 		} else { // empty also means true!
 			messageToSL += name		
 		}
@@ -221,35 +234,49 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-type", "text/plain; charset=utf-8")
 	fmt.Fprintf(w, messageToSL)
 }
-
-// searchKV searches the KV database for an avatar name. The other operations are trivial.
-func searchKV(avatarName string) string {
+// searchKVname searches the KV database for an avatar name.
+func searchKVname(avatarName string) (UUID string, grid string) {
+	kv, err := badger.NewKV(&Opt)
+	defer kv.Close()
+	var item badger.KVItem
+	if err := kv.Get([]byte(avatarName), &item); err != nil {
+		log.Errorf("Error while getting name: %s - %v\n", avatarName, err)
+		return NullUUID, ""
+	}
+	var val avatarUUID
+	if err = json.Unmarshal(item.Value(), &val); err != nil {
+		log.Errorf("Error while unparsing UUID for name: %s - %v\n", avatarName, err)
+		return NullUUID, ""
+	}
+	return val.UUID, val.Grid
+}
+// searchKVUUID searches the KV database for an avatar key.
+func searchKVUUID(avatarKey string) (name string, grid string) {
 	kv, err := badger.NewKV(&Opt)
 	checkErr(err) // should probably panic
 
 	itOpt := badger.DefaultIteratorOptions
 	itr := kv.NewIterator(itOpt)
-
-	found := NullUUID
+	var val = avatarUUID{ NullUUID, "" }
+	var found string
 	checks := 0
+	time_start := time.Now()
 	for itr.Rewind(); itr.Valid(); itr.Next() {
 		item := itr.Item()
-		key := item.Key()
-		val := item.Value()	// This could block while value is fetched from value log.
-						 	// For key only iteration, set opt.FetchValues to false, and don't call
-							// item.Value().
-		checks++	//Just to see how many
-		if avatarName == string(val) {	// are these pointers?
-			found = string(key)
-			break
-		} 						 
-		// Remember that both key, val would become invalid in the next iteration of the loop.
-		// So, if you need access to them outside, copy them or parse them.
+		if err = json.Unmarshal(item.Value(), &val); err == nil {
+			checks++	//Just to see how many
+			if avatarKey == val.UUID {	// are these pointers?
+				found = string(item.Key())
+				break
+			}
+		}	
 	}
-	log.Debugf("Made %d checks for '%s'", checks, avatarName)
+	time_end := time.Now()
+	diffTime := time_end.Sub(time_start)
+	log.Debugf("Made %d checks for '%s' in %v\n", checks, avatarKey, diffTime)
 	itr.Close()
 	kv.Close()
-	return found
+	return found, val.Grid
 }
 
 // importDatabase is essentially reading a bzip2'ed CSV file with UUID,AvatarName downloaded from http://w-hat.com/#name2key .
@@ -267,7 +294,7 @@ func importDatabase(filename string) {
 	kv, err := badger.NewKV(&Opt)
 	checkErrPanic(err) // should probably panic		
 	defer kv.Close()
-
+	time_start := time.Now()
 	for {
 		record, err := cr.Read()
 		if err == io.EOF {
@@ -276,14 +303,23 @@ func importDatabase(filename string) {
 		if err != nil {
 			log.Fatal(err)
 		}
-		//fmt.Println("Key:", record[0], "Name:", record[1])
-		kv.Set([]byte(record[0]), []byte(record[1]), 0x00)
-
+		//fmt.Println("Key:", record[0], "Name:", record[1])			
+		jsonNewEntry, err := json.Marshal(avatarUUID{ record[0], "Production" }) // W-Hat keys come all from the main LL grid, known as 'Production'
+		if err != nil {
+			log.Warning(err)
+		} else {
+			kv.Set([]byte(record[1]), []byte(jsonNewEntry), 0x00)
+		}
 		limit++
-		if limit % 100000 == 0 {
-			log.Info("Read", limit, "records (or thereabouts)")
+		if limit % 1000000 == 0 {
+			time_end := time.Now()
+			diffTime := time_end.Sub(time_start)
+			log.Info("Read", limit, "records (or thereabouts) in", diffTime)
 		}
 	}
+	time_end := time.Now()
+	diffTime := time_end.Sub(time_start)
+	log.Info("Total read", limit, "records (or thereabouts) in", diffTime)
 }
 
 // NOTE(gwyneth):Auxiliary functions which I'm always using...
