@@ -30,7 +30,7 @@ go get github.com/dgraph-io/badger
 go get github.com/op/go-logging
 go get gopkg.in/natefinch/lumberjack.v2
 ```
-which are, respectively, a very fast name/key database; a powerful logging system; and a way to rotate logs (a lumberjack... chops down logs... get it? :) Aye, Gophers have a sense of humour).
+which are, respectively, a very fast key/value database; a powerful logging system; and a way to rotate logs (a lumberjack... chops down logs... get it? :) Aye, Gophers have a sense of humour).
 
 Finally, `go get git.gwynethllewelyn.net/GwynethLlewelyn/gosl-basics.git` and you _ought_ to have a binary executable file in `~/go/bin` called `gosl-basics`. Just run it!
 
@@ -39,6 +39,10 @@ Then grab the two LSL scripts, `query.lsl` and `touch.lsl`. The first runs queri
 ## Configuration
 You can run the executable either as:
 
+	-dir string
+        Directory where database files are stored (default "slkvdb")
+	-import string
+        (experimental) Import database from W-Hat (use the csv.bz2 version)
 	-port string
         Server port (default "3000")
 	-server
@@ -56,10 +60,16 @@ For the standalone server: this will be something like `http://your.server.name:
 
 For FastCGI: If your base URL (i.e. pointing to the directory where you have installed `gosl-basics`) is something like `http://your.hosted-server.name/examples` then your URLs will be something like `http://your.hosted-server.name/examples/gosl-basics`. Some providers might force you to add an extension like `.fcgi`, meaning that you will have to remember to add that explicitly every time you compile the application again (or just use a [Makefile](https://www.devroom.io/2015/10/03/a-makefile-for-golang-cli-tools/) for that!).
 
+Note that the first time ever the application runs, it will check if the database directory exists, and if not, it will attempt to create it (and panic if it cannot create it, due to permissions — basically, if it can't create a directory, it won't be able to create the database files either). You can define a different location for the database; this might be important when using FastCGI on a shared server, because you might wish to use a private area of your web server, so that it cannot be directly accessed.
+
 ## Limitations
 
 I found that somehow the standard FastCGI package in Go seems to be limited to just one handler on the path router, so I took that into account and simply tried to figure out what was requested based on the valid parameters (`name` and `key`) passed via GET or POST. A more complex real-world example might require a much more sophisticated router; possibly the [Gorilla](https://github.com/gorilla/mux) router would handle FastCGI better, I don't know.
 
-Note that the current version can be used as a direct replacement for [W-Hat's name2key](http://w-hat.com/#name2key). There is now a 'compatibility mode' with W-Hat: if on the calling URL the extra parameter `"compat=false"` is passed, then cute messages are sent back; if not, then it just sends back the UUID (or the avatar name). Further compatibility with W-Hat's database is not built-in. Note that you need to download W-Hat's database and install it.
+Note that the current version can be used as a direct replacement for [W-Hat's name2key](http://w-hat.com/#name2key). There is now a 'compatibility mode' with W-Hat: if on the calling URL the extra parameter `"compat=false"` is passed, then cute messages are sent back; if not, then it just sends back the UUID (or the avatar name). Further compatibility with W-Hat's database is not built-in.
 
-Also note that this will work on OpenSimulator grids as well: UUIDs are supposed to be universal and unique, so each avatar on all OpenSimulator grids out there should have their own UUIDs, different from the ones in Second Life®, and you are able to freely mix them together. A better alternative (as an exercise to the user!) would be to capture the grid name from the headers and store it with the avatar name/key pair; in that scenario, you could change the web service so that it only replies with name/key pairs from the grid it has been called from (but storing them all on the same database, with exactly the same interface). This is certainly possible!
+To actually _use_ the W-Hat database, you need to download it first and import it. This means using the `-import` command (use the `name2key.csv.bz2`version). W-Hat still updates that database daily, so, with some clever `cron` magic, you might be able to get a fresh copy every day to import. Note that the database is supposed to be unique by name (and the UUIDs are not supposed to change): that means that you can import the 'new' version over an 'old' version, and only the relevant entries will be changed. Also, if you happen to have captured new entries (not yet existing on W-Hat's database) then these will _not_ be overwritten (or deleted) with a new import. To delete an old database, just delete the directory it is in.
+
+Importing the whole W-Hat database, which has a bit over 9 million entries, took on my Mac 3 minutes and 5 seconds. Aye, that's quite a long time. On a shared server, it can be even longer.
+
+This also works for OpenSimulator grids and you can use the same scripts and database if you wish. Currently, the database stores an extra field with UUID, which is usually set to the name of the grid. Linden Lab sets these as 'Production' and 'Testing' respectively; other grid operators may use other names. There is no guarantee that every grid operator has configured their database with an unique name. Also, because of the way the key/value database works, it _assumes_ that all avatar names are unique across _all_ grids, which may not be true: only UUIDs are guaranteed to be unique. The reason why this was implemented this way was that I wanted _very fast_ name2key searches, while I'm not worried about very slow key2name searches, since those are implemented in LSL anyway. To make sure that you can have many avatars with the same name but different UUIDs, well, it would require a different kind of database. Also, what should a function return for an avatar with three different UUIDs? You can see the problem there. Therefore I kept it simple, but be mindful of this limitation.
