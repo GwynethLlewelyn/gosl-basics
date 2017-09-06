@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/table"
 	"github.com/op/go-logging"
 	"gopkg.in/natefinch/lumberjack.v2"
 	"io"
@@ -55,13 +56,17 @@ func main() {
 	var isServer = flag.Bool("server", false, "Run as server on port " + *myPort)
 	var isShell  = flag.Bool("shell", false, "Run as an interactive shell")
 	var importFilename = flag.String("import", "", "Import database from W-Hat (use the csv.bz2 version)")
+	var noMemory = flag.Bool("nomemory", false, "Attempt to use only disk to save memory (important for shared webservers)")
+	
 	// default is FastCGI
 
 	flag.Parse()
 	// We cannot write to stdout if we're running as FastCGI, only to logs!
 	
 	if *isServer || *isShell {
-		fmt.Println("gosl is starting...")
+		fmt.Println("gosl is starting...")	
+	} else { // FastCGI: we cannot write to stdio, we need to setup the logger so that we can write to disk
+		*noMemory = true
 	}
 	
 	// Setup the lumberjack rotating logger. This is because we need it for the go-logging logger when writing to files. (20170813)
@@ -111,6 +116,10 @@ func main() {
 	}
 	Opt.Dir = *myDir
 	Opt.ValueDir = Opt.Dir
+	if *noMemory {
+		Opt.MapTablesTo = table.Nothing
+		log.Info("Trying to avoid too much memory consumption")	
+	}
 	kv, err := badger.NewKV(&Opt)
 	checkErrPanic(err) // should probably panic, cannot prep new database
 	var testValue = avatarUUID{ NullUUID, "all grids" }

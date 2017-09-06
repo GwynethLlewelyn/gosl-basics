@@ -27,10 +27,11 @@ Requirements:
 Taking that into account, all you need now to do is add the external packages used by this project:
 ```
 go get github.com/dgraph-io/badger
+go get github.com/dgraph-io/badger/table
 go get github.com/op/go-logging
 go get gopkg.in/natefinch/lumberjack.v2
 ```
-which are, respectively, a very fast key/value database; a powerful logging system; and a way to rotate logs (a lumberjack... chops down logs... get it? :) Aye, Gophers have a sense of humour).
+which are, respectively, a very fast key/value database (and some extra variables defined elsewhere); a powerful logging system; and a way to rotate logs (a lumberjack... chops down logs... get it? :) Aye, Gophers have a sense of humour).
 
 Finally, `go get git.gwynethllewelyn.net/GwynethLlewelyn/gosl-basics.git` and you _ought_ to have a binary executable file in `~/go/bin` called `gosl-basics`. Just run it!
 
@@ -40,16 +41,18 @@ Then grab the two LSL scripts, `query.lsl` and `touch.lsl`. The first runs queri
 You can run the executable either as:
 
 	-dir string
-        Directory where database files are stored (default "slkvdb")
+		Directory where database files are stored (default "slkvdb")
 	-import string
-        (experimental) Import database from W-Hat (use the csv.bz2 version)
+		(experimental) Import database from W-Hat (use the csv.bz2 version)
+	-nomemory
+		Attempt to use only disk to save memory (important for shared webservers)
 	-port string
-        Server port (default "3000")
+		Server port (default "3000")
 	-server
-        Run as server on port 3000
+		Run as server on port 3000
 	-shell
-        Run as an interactive shell
-     
+		Run as an interactive shell
+	 
 Basically, if you are running your own server (possibly at home!), you only need to run `gosl-basics -server`. You don't need to set up Apache or nginx or any other third-party software; `gosl-basics` is a fully standalone application and does not depend on anything.
 
 If you're using a shared web server, like the ones provided by [Dreamhost](https://dreamhost.com), then you will very likely want to run `gosl-basics` as a FastCGI application. Why? Well, Dreamhost's Terms of Service explicitly forbid any application to be run all the time (to conserve memory, CPU slices, and, well, open ports). Instead, they offer the ability to run applications as FastCGI applications instead (under their own Apache). This is actually a very cool interface (as opposed to the ancient, non-fast CGI...) allowing parts of the setup of the application to be done when it is called the first time, and then launch requests on demand. _If_ there is a _lot_ of traffic, the application will actually remain active in memory/CPU for a long time! If it only gets sporadic calls once in a while, well, in that case, the application gets removed from memory until someone calls the URL again. I have not tested exhaustively, and this will certainly depend from provider to provider, but Dreamhost seems to allow the application to remain active in memory and in the process space for 30-60 seconds.
@@ -61,6 +64,8 @@ For the standalone server: this will be something like `http://your.server.name:
 For FastCGI: If your base URL (i.e. pointing to the directory where you have installed `gosl-basics`) is something like `http://your.hosted-server.name/examples` then your URLs will be something like `http://your.hosted-server.name/examples/gosl-basics`. Some providers might force you to add an extension like `.fcgi`, meaning that you will have to remember to add that explicitly every time you compile the application again (or just use a [Makefile](https://www.devroom.io/2015/10/03/a-makefile-for-golang-cli-tools/) for that!).
 
 Note that the first time ever the application runs, it will check if the database directory exists, and if not, it will attempt to create it (and panic if it cannot create it, due to permissions — basically, if it can't create a directory, it won't be able to create the database files either). You can define a different location for the database; this might be important when using FastCGI on a shared server, because you might wish to use a private area of your web server, so that it cannot be directly accessed.
+
+The `-nomemory` switch may seem weird, but in some scenarios, like shared servers with FastCGI, the actual memory consumption may be limited, so this attempts to reduce the amount of necessary memory (things will run much slower, though!)
 
 ## Limitations
 
