@@ -9,7 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/dgraph-io/badger"
-	"github.com/dgraph-io/badger/table"
+	"github.com/dgraph-io/badger/options"
 	"github.com/op/go-logging"
 	"gopkg.in/natefinch/lumberjack.v2"
 	"io"
@@ -117,7 +117,7 @@ func main() {
 	Opt.Dir = *myDir
 	Opt.ValueDir = Opt.Dir
 	if *noMemory {
-		Opt.MapTablesTo = table.Nothing
+		Opt.TableLoadingMode = options.FileIO // use standard file I/O operations for tables instead of LoadRAM 
 		log.Info("Trying to avoid too much memory consumption")	
 	}
 	kv, err := badger.NewKV(&Opt)
@@ -260,7 +260,10 @@ func searchKVname(avatarName string) (UUID string, grid string) {
 		return NullUUID, ""
 	}
 	var val avatarUUID
-	if err = json.Unmarshal(item.Value(), &val); err != nil {
+	if err = json.Unmarshal(item.Value(func(v []byte) {
+    		value = make([]byte, len(v))
+			copy(value, v)
+		}), &val); err != nil {
 		log.Errorf("Error while unparsing UUID for name: %s - %v\n", avatarName, err)
 		return NullUUID, ""
 	}
@@ -279,7 +282,10 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 	time_start := time.Now()
 	for itr.Rewind(); itr.Valid(); itr.Next() {
 		item := itr.Item()
-		if err = json.Unmarshal(item.Value(), &val); err == nil {
+		if err = json.Unmarshal(item.Value(func(v []byte) {
+				value = make([]byte, len(v))
+				copy(value, v)
+			}), &val); err == nil {
 			checks++	//Just to see how many
 			if avatarKey == val.UUID {	// are these pointers?
 				found = string(item.Key())
@@ -311,6 +317,7 @@ func importDatabase(filename string) {
 	checkErrPanic(err) // should probably panic		
 	defer kv.Close()
 	time_start := time.Now()
+	// probably better to get several chunks and use BatchSet concurrently, as recommended per the Badger instructions
 	for {
 		record, err := cr.Read()
 		if err == io.EOF {
