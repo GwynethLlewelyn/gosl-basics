@@ -259,11 +259,10 @@ func searchKVname(avatarName string) (UUID string, grid string) {
 		log.Errorf("Error while getting name: %s - %v\n", avatarName, err)
 		return NullUUID, ""
 	}
-	var val avatarUUID
-	if err = json.Unmarshal(item.Value(func(v []byte) {
-    		value = make([]byte, len(v))
-			copy(value, v)
-		}), &val); err != nil {
+	var val = avatarUUID{ NullUUID, "" }
+	if err = item.Value(func(v []byte) {
+			err = json.Unmarshal(v, &val)
+		}); err != nil {
 		log.Errorf("Error while unparsing UUID for name: %s - %v\n", avatarName, err)
 		return NullUUID, ""
 	}
@@ -282,12 +281,11 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 	time_start := time.Now()
 	for itr.Rewind(); itr.Valid(); itr.Next() {
 		item := itr.Item()
-		if err = json.Unmarshal(item.Value(func(v []byte) {
-				value = make([]byte, len(v))
-				copy(value, v)
-			}), &val); err == nil {
-			checks++	//Just to see how many
-			if avatarKey == val.UUID {	// are these pointers?
+		if err = item.Value(func(v []byte) {
+				err = json.Unmarshal(v, &val)
+			}); err == nil {
+			checks++	//Just to see how many checks we made, for statistical purposes
+			if avatarKey == val.UUID {
 				found = string(item.Key())
 				break
 			}
