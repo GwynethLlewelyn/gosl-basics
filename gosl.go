@@ -119,7 +119,8 @@ func main() {
 	Opt.Dir = *myDir
 	Opt.ValueDir = Opt.Dir
 	if *noMemory {
-		Opt.TableLoadingMode = options.FileIO // use standard file I/O operations for tables instead of LoadRAM
+//		Opt.TableLoadingMode = options.FileIO // use standard file I/O operations for tables instead of LoadRAM
+		Opt.TableLoadingMode = options.MemoryMap // MemoryMap indicates that that the file must be memory-mapped - https://github.com/dgraph-io/badger/issues/224#issuecomment-329643771
 		BATCH_BLOCK = 10000	// try to import less at each time, it will take longer but hopefully work
 		log.Info("Trying to avoid too much memory consumption")	
 	}
@@ -264,8 +265,8 @@ func searchKVname(avatarName string) (UUID string, grid string) {
 		return NullUUID, ""
 	}
 	var val = avatarUUID{ NullUUID, "" }
-	if err = item.Value(func(v []byte) {
-			err = json.Unmarshal(v, &val)
+	if err = item.Value(func(v []byte) error {
+			return json.Unmarshal(v, &val)
 		}); err != nil {
 		log.Errorf("Error while unparsing UUID for name: %s - %v\n", avatarName, err)
 		return NullUUID, ""
@@ -289,8 +290,8 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 	checks := 0
 	for itr.Rewind(); itr.Valid(); itr.Next() {
 		item := itr.Item()
-		if err = item.Value(func(v []byte) {
-				err = json.Unmarshal(v, &val)
+		if err = item.Value(func(v []byte) error {
+				return json.Unmarshal(v, &val)
 			}); err == nil {
 			checks++	//Just to see how many checks we made, for statistical purposes
 			if avatarKey == val.UUID {
