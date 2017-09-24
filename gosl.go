@@ -106,9 +106,6 @@ func main() {
 		logging.SetBackend(backendFileLeveled)	// FastCGI only logs to file
 	}
 
-	log.Info("gosl started and logging is set up. Proceeding to test KV database.")
-	const testAvatarName = "Nobody Here"
-	var err error
 	Opt = badger.DefaultOptions
 	// Check if this directory actually exists; if not, create it. Panic if something wrong happens (we cannot proceed without a valid directory for the database to be written
 	if stat, err := os.Stat(*myDir); err == nil && stat.IsDir() {
@@ -122,8 +119,8 @@ func main() {
 	}
 	Opt.Dir = *myDir
 	Opt.ValueDir = Opt.Dir
-	//Opt.TableLoadingMode = options.MemoryMap
-	Opt.TableLoadingMode = options.FileIO
+	Opt.TableLoadingMode = options.MemoryMap
+	//Opt.TableLoadingMode = options.FileIO
 
 	if *noMemory {
 //		Opt.TableLoadingMode = options.FileIO // use standard file I/O operations for tables instead of LoadRAM
@@ -132,18 +129,24 @@ func main() {
 		BATCH_BLOCK = 1000	// try to import less at each time, it will take longer but hopefully work
 		log.Info("Trying to avoid too much memory consumption")	
 	}
-	kv, err := badger.NewKV(&Opt)
-	checkErrPanic(err) // should probably panic, cannot prep new database
-	var testValue = avatarUUID{ NullUUID, "all grids" }
-	jsonTestValue, err := json.Marshal(testValue)
-	checkErrPanic(err) // something went VERY wrong
-	kv.Set([]byte(testAvatarName), jsonTestValue, 0x00)
-	log.Debugf("SET %+v (json: %v)\n", testValue, string(jsonTestValue))
-	kv.Close()
-	key, grid := searchKVname(testAvatarName)
-	log.Debugf("GET '%s' returned '%s' [grid '%s']\n", testAvatarName, key, grid)
-	
-	log.Info("KV database seems fine.")
+	if *isShell {
+		// Do some testing to see if the database is available				
+		const testAvatarName = "Nobody Here"
+		var err error
+
+		log.Info("gosl started and logging is set up. Proceeding to test KV database.")
+		kv, err := badger.NewKV(&Opt)
+		checkErrPanic(err) // should probably panic, cannot prep new database
+		var testValue = avatarUUID{ NullUUID, "all grids" }
+		jsonTestValue, err := json.Marshal(testValue)
+		checkErrPanic(err) // something went VERY wrong
+		kv.Set([]byte(testAvatarName), jsonTestValue, 0x00)
+		log.Debugf("SET %+v (json: %v)\n", testValue, string(jsonTestValue))
+		kv.Close()
+		key, grid := searchKVname(testAvatarName)
+		log.Debugf("GET '%s' returned '%s' [grid '%s']\n", testAvatarName, key, grid)
+		log.Info("KV database seems fine.")
+	}
 	
 	if *importFilename != "" {
 		log.Info("Attempting to import", *importFilename, "...")
@@ -151,7 +154,7 @@ func main() {
 		log.Info("Database finished import.")
 	}
 	
-	if (*isShell) {
+	if *isShell {
 		log.Info("Starting to run as interactive shell")
 		reader := bufio.NewReader(os.Stdin)
 		fmt.Println("Ctrl-C to quit.")
@@ -183,6 +186,7 @@ func main() {
 	// set up routing.
 	// NOTE(gwyneth): one function only because FastCGI seems to have problems with multiple handlers.
 	http.HandleFunc("/", handler)
+	log.Info("Directory for database: ", *myDir)
 	
 	if (*isServer) {
 		log.Info("Starting to run as web server on port " + *myPort)
@@ -191,8 +195,7 @@ func main() {
 	} else {
 		// default is to run as FastCGI!
 		// works like a charm thanks to http://www.dav-muz.net/blog/2013/09/how-to-use-go-and-fastcgi/
-		log.Info("Starting to run as FastCGI")
-		log.Info("http.DefaultServeMux is", http.DefaultServeMux)
+		log.Debug("http.DefaultServeMux is", http.DefaultServeMux)
 		if err := fcgi.Serve(nil, nil); err != nil {
 			checkErrPanic(err)
 		}
@@ -215,10 +218,12 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// test first if this comes from Second Life or OpenSimulator
+/*
 	if r.Header.Get("X-Secondlife-Region") == "" {
 		logErrHTTP(w, http.StatusForbidden, "Sorry, this application only works inside Second Life.")
 		return
 	}
+*/
 	name := r.Form.Get("name") // can be empty
 	key := r.Form.Get("key") // can be empty
 	compat := r.Form.Get("compat") // compatibility mode with W-Hat
@@ -269,14 +274,14 @@ func searchKVname(avatarName string) (UUID string, grid string) {
 	defer kv.Close()
 	var item badger.KVItem
 	if err := kv.Get([]byte(avatarName), &item); err != nil {
-		log.Errorf("Error while getting name: %s - %v\n", avatarName, err)
+		log.Errorf("Error while getting name: '%s' - (%v)\n", avatarName, err)
 		return NullUUID, ""
 	}
 	var val = avatarUUID{ NullUUID, "" }
 	if err = item.Value(func(v []byte) error {
 			return json.Unmarshal(v, &val)
 		}); err != nil {
-		log.Errorf("Error while unparsing UUID for name: %s - %v\n", avatarName, err)
+		log.Errorf("Error while unparsing UUID for name: '%s' (%v)\n", avatarName, err)
 		return NullUUID, ""
 	}
 	time_end := time.Now()
