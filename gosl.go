@@ -110,7 +110,7 @@ func main() {
 	// Check if this directory actually exists; if not, create it. Panic if something wrong happens (we cannot proceed without a valid directory for the database to be written
 	if stat, err := os.Stat(*myDir); err == nil && stat.IsDir() {
 		// path is a valid directory
-		log.Debugf("Valid directory: %s\n", *myDir)
+		log.Infof("Valid directory: %s\n", *myDir)
 	} else {
 		// try to create directory
 		err = os.Mkdir(*myDir, 0700)
@@ -126,10 +126,11 @@ func main() {
 //		Opt.TableLoadingMode = options.FileIO // use standard file I/O operations for tables instead of LoadRAM
 //		Opt.TableLoadingMode = options.MemoryMap // MemoryMap indicates that that the file must be memory-mapped - https://github.com/dgraph-io/badger/issues/224#issuecomment-329643771
 		Opt.TableLoadingMode = options.FileIO
+		Opt.ValueLogFileSize = 1048576
 		BATCH_BLOCK = 1000	// try to import less at each time, it will take longer but hopefully work
 		log.Info("Trying to avoid too much memory consumption")	
 	}
-	if *isShell {
+	//if *isShell {
 		// Do some testing to see if the database is available				
 		const testAvatarName = "Nobody Here"
 		var err error
@@ -146,7 +147,7 @@ func main() {
 		key, grid := searchKVname(testAvatarName)
 		log.Debugf("GET '%s' returned '%s' [grid '%s']\n", testAvatarName, key, grid)
 		log.Info("KV database seems fine.")
-	}
+	//}
 	
 	if *importFilename != "" {
 		log.Info("Attempting to import", *importFilename, "...")
@@ -186,7 +187,7 @@ func main() {
 	// set up routing.
 	// NOTE(gwyneth): one function only because FastCGI seems to have problems with multiple handlers.
 	http.HandleFunc("/", handler)
-	log.Info("Directory for database: ", *myDir)
+	log.Info("Directory for database:", *myDir)
 	
 	if (*isServer) {
 		log.Info("Starting to run as web server on port " + *myPort)
