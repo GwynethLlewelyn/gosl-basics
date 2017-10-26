@@ -38,7 +38,7 @@ type avatarUUID struct {
 	Grid string
 } 
 
-var BATCH_BLOCK = 1000000	// how many entries to write to the database as a block; the bigger, the faster, but the more memory it consumes
+var BATCH_BLOCK = 100000	// how many entries to write to the database as a block; the bigger, the faster, but the more memory it consumes
 							// the authors say that 100000 is way too much
 
 /*
