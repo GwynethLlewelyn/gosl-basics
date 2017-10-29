@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/tidwall/buntdb"
 	"github.com/dgraph-io/badger"
 	"github.com/dgraph-io/badger/options"
 	"github.com/op/go-logging"
@@ -15,6 +16,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/fcgi"
+	_ "net/http/pprof"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -24,12 +26,13 @@ import (
 )
 
 const NullUUID = "00000000-0000-0000-0000-000000000000" // always useful when we deal with SL/OpenSimulator...
+const databaseName = "gosl-database.db" // for BuntDB
 
 // Logging setup.
 var log = logging.MustGetLogger("gosl")	// configuration for the go-logging logger, must be available everywhere
 var logFormat logging.Formatter
 
-// Opt is used for KV database setup.
+// Opt is used for Badger database setup.
 var Opt badger.Options
 
 // AvatarUUID is the type that we store in the database; we keep a record from which grid it came from.
@@ -38,9 +41,9 @@ type avatarUUID struct {
 	Grid string
 } 
 
-var BATCH_BLOCK = 100000	// how many entries to write to the database as a block; the bigger, the faster, but the more memory it consumes
+var BATCH_BLOCK = 100000	// how many entries to write to the Badger database as a block; the bigger, the faster, but the more memory it consumes
 							// the authors say that 100000 is way too much
-
+							// NOTE(gwyneth): let's see what happens with BuntDB
 /*
 				  .__			 
   _____ _____  |__| ____  
@@ -50,20 +53,23 @@ var BATCH_BLOCK = 100000	// how many entries to write to the database as a block
 	  \/	 \/			  \/ 
 */
 
-var noMemory *bool
+// some of these flags need to be global
+var noMemory, useBadger *bool
+var myDir *string
+var dbNamePath string // for BuntDB
 
 // main() starts here.
 func main() {
 	// Flag setup
-	var myPort	 = flag.String("port", "3000", "Server port")
-	var myDir	 = flag.String("dir", "slkvdb", "Directory where database files are stored")
-	var isServer = flag.Bool("server", false, "Run as server on port " + *myPort)
-	var isShell  = flag.Bool("shell", false, "Run as an interactive shell")
-	var importFilename = flag.String("import", "", "Import database from W-Hat (use the csv.bz2 version)")
-	noMemory = flag.Bool("nomemory", false, "Attempt to use only disk to save memory (important for shared webservers)")
+	var myPort			= flag.String("port", "3000", "Server port")
+	myDir				= flag.String("dir", "slkvdb", "Directory where database files are stored")
+	var isServer		= flag.Bool("server", false, "Run as server on port " + *myPort)
+	var isShell			= flag.Bool("shell", false, "Run as an interactive shell")
+	var importFilename	= flag.String("import", "", "Import database from W-Hat (use the csv.bz2 version)")
+	useBadger 			= flag.Bool("usebadger", false, "Use Badger instead of BuntDB")
+	noMemory 			= flag.Bool("nomemory", false, "Attempt to use only disk to save memory on Badger (important for shared webservers)")
 	
 	// default is FastCGI
-
 	flag.Parse()
 	// We cannot write to stdout if we're running as FastCGI, only to logs!
 	
@@ -104,7 +110,6 @@ func main() {
 		logging.SetBackend(backendFileLeveled)	// FastCGI only logs to file
 	}
 
-	Opt = badger.DefaultOptions
 	// Check if this directory actually exists; if not, create it. Panic if something wrong happens (we cannot proceed without a valid directory for the database to be written
 	if stat, err := os.Stat(*myDir); err == nil && stat.IsDir() {
 		// path is a valid directory
@@ -115,30 +120,41 @@ func main() {
 		checkErrPanic(err) // cannot make directory, panic and exit logging what went wrong
 		log.Debugf("Created new directory: %s\n", *myDir)		
 	}
-	Opt.Dir = *myDir
-	Opt.ValueDir = Opt.Dir
-	Opt.TableLoadingMode = options.MemoryMap
-	//Opt.TableLoadingMode = options.FileIO
-
-	if *noMemory {
+	if *useBadger {
+		Opt = badger.DefaultOptions
+		Opt.Dir = *myDir
+		Opt.ValueDir = Opt.Dir
+		Opt.TableLoadingMode = options.MemoryMap
+		//Opt.TableLoadingMode = options.FileIO
+	}
+	if *noMemory && *useBadger {
 //		Opt.TableLoadingMode = options.FileIO // use standard file I/O operations for tables instead of LoadRAM
 //		Opt.TableLoadingMode = options.MemoryMap // MemoryMap indicates that that the file must be memory-mapped - https://github.com/dgraph-io/badger/issues/224#issuecomment-329643771
 		Opt.TableLoadingMode = options.FileIO
-		Opt.ValueLogFileSize = 1048576
-		BATCH_BLOCK = 1000	// try to import less at each time, it will take longer but hopefully work
+//		Opt.ValueLogFileSize = 1048576
+		Opt.MaxTableSize = 1048576 * 12
+		Opt.NumMemtables = 0
+		Opt.MaxLevels = 10
+		Opt.SyncWrites = false
+		Opt.NumCompactors = 10
+		Opt.NumLevelZeroTables = 10
+//		Opt.maxBatchSize =
+//		Opt.maxBatchCount =
+		BATCH_BLOCK = 10000	// try to import less at each time, it will take longer but hopefully work
 		log.Info("Trying to avoid too much memory consumption")	
 	}
-	//if *isShell {
 		// Do some testing to see if the database is available				
-		const testAvatarName = "Nobody Here"
-		var err error
+	const testAvatarName = "Nobody Here"
+	var err error
 
-		log.Info("gosl started and logging is set up. Proceeding to test KV database.")
+	log.Info("gosl started and logging is set up. Proceeding to test KV database.")
+	var testValue = avatarUUID{ NullUUID, "all grids" }
+	jsonTestValue, err := json.Marshal(testValue)
+	checkErrPanic(err) // something went VERY wrong
+
+	if *useBadger {
 		kv, err := badger.Open(Opt)
 		checkErrPanic(err) // should probably panic, cannot prep new database
-		var testValue = avatarUUID{ NullUUID, "all grids" }
-		jsonTestValue, err := json.Marshal(testValue)
-		checkErrPanic(err) // something went VERY wrong
 		txn := kv.NewTransaction(true)
 		err = txn.Set([]byte(testAvatarName), jsonTestValue, 0x00)
 		checkErrPanic(err)
@@ -146,10 +162,26 @@ func main() {
 		checkErrPanic(err)
 		log.Debugf("SET %+v (json: %v)\n", testValue, string(jsonTestValue))
 		kv.Close()
-		key, grid := searchKVname(testAvatarName)
-		log.Debugf("GET '%s' returned '%s' [grid '%s']\n", testAvatarName, key, grid)
-		log.Info("KV database seems fine.")
-	//}
+	} else {
+		/* NOTE(gwyneth): this fails because pointers to strings do not implement len(). Duh! 
+		if *myDir[len(*myDir)-1] != os.PathSeparator {
+			*myDir = append(*myDir + os.PathSeparator
+		} */
+		dbNamePath = *myDir + string(os.PathSeparator) + databaseName
+		db, err := buntdb.Open(dbNamePath)
+		checkErrPanic(err)
+		err = db.Update(func(tx *buntdb.Tx) error {
+			_, _, err := tx.Set(testAvatarName, string(jsonTestValue), nil)
+			return err
+		})
+		checkErr(err)
+		log.Debugf("SET %+v (json: %v)\n", testValue, string(jsonTestValue))
+		db.Close()
+	}
+	// common to both databases:
+	key, grid := searchKVname(testAvatarName)
+	log.Debugf("GET '%s' returned '%s' [grid '%s']\n", testAvatarName, key, grid)
+	log.Info("KV database seems fine.")
 	
 	if *importFilename != "" {
 		log.Info("Attempting to import", *importFilename, "...")
@@ -235,19 +267,30 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	if name != "" {
 		if key != "" {
 			// we received both: add a new entry
-			kv, err := badger.Open(Opt)
-			checkErrPanic(err) // should probably panic
 			valueToInsert.UUID = key
 			valueToInsert.Grid = r.Header.Get("X-Secondlife-Shard")
 			jsonValueToInsert, err := json.Marshal(valueToInsert)
 			checkErr(err)
-			txn := kv.NewTransaction(true)
-			defer txn.Discard()
-			err = txn.Set([]byte(name), jsonValueToInsert, 0x00)
-			checkErrPanic(err)
-			err = txn.Commit(nil)
-			checkErrPanic(err)
-			kv.Close()
+			if *useBadger {
+				kv, err := badger.Open(Opt)
+				checkErrPanic(err) // should probably panic
+				txn := kv.NewTransaction(true)
+				defer txn.Discard()
+				err = txn.Set([]byte(name), jsonValueToInsert, 0x00)
+				checkErrPanic(err)
+				err = txn.Commit(nil)
+				checkErrPanic(err)
+				kv.Close()
+			} else {
+				db, err := buntdb.Open(dbNamePath)
+				checkErrPanic(err)
+				defer db.Close()				
+				err = db.Update(func(tx *buntdb.Tx) error {
+					_, _, err := tx.Set(name, string(jsonValueToInsert), nil)
+					return err
+				})
+				checkErr(err)
+			}
 			messageToSL += "Added new entry for '" + name + "' which is: " + valueToInsert.UUID + " from grid: '" + valueToInsert.Grid + "'"
 		} else {
 			// we received a name: look up its UUID key and grid.
@@ -277,83 +320,119 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 // searchKVname searches the KV database for an avatar name.
 func searchKVname(avatarName string) (UUID string, grid string) {
-	time_start := time.Now()
-	kv, err := badger.Open(Opt)
-	defer kv.Close()
-//	var item badger.Item
 	var val = avatarUUID{ NullUUID, "" }
-//	txn := kv.NewTransaction(true)
-//	defer txn.Discard()
-	err = kv.View(func(txn *badger.Txn) error {
-	    item, err := txn.Get([]byte(avatarName))
-		if err != nil {
-			return err
-    	}    	
-    	data, err := item.Value()
-		if err != nil {
-			log.Errorf("Error '%s' while getting data from %v\n", err, item)
-			return err
-    	}    	
-    	err = json.Unmarshal(data, &val)
-		if err != nil {
-			log.Errorf("Error while unparsing UUID for name: '%s' (%v)\n", avatarName, err)
-			return err
-    	}
-    	return nil
-	})	
-	if err != nil {
-		return NullUUID, ""
-	}
-	time_end := time.Now()
-	diffTime := time_end.Sub(time_start)
-	log.Debugf("Time to lookup '%s': %v\n", avatarName, diffTime)
-	return val.UUID, val.Grid
-}
-// searchKVUUID searches the KV database for an avatar key.
-func searchKVUUID(avatarKey string) (name string, grid string) {
 	time_start := time.Now()
-	kv, err := badger.Open(Opt)
-	checkErr(err) // should probably panic
-	itOpt := badger.DefaultIteratorOptions
-	if !*noMemory {
-		itOpt.PrefetchValues = true
-		itOpt.PrefetchSize = 1000	// attempt to get this a little bit more efficient; we have many small entries, so this is not too much
-	} else {
-		itOpt.PrefetchValues = false
-	}
-	checks := 0
-	var val = avatarUUID{ NullUUID, "" }
-	var found string
-	txn := kv.NewTransaction(true)
-	defer txn.Discard()
-
-	err = kv.View(func(txn *badger.Txn) error {				
-		itr := txn.NewIterator(itOpt)
-		defer itr.Close()		
-		for itr.Rewind(); itr.Valid(); itr.Next() {
-			item := itr.Item()
-			data, err := item.Value()
+	var err error // to deal with scope issues
+	if *useBadger {
+		kv, err := badger.Open(Opt)
+		checkErrPanic(err)
+		defer kv.Close()
+		err = kv.View(func(txn *badger.Txn) error {
+		    item, err := txn.Get([]byte(avatarName))
+			if err != nil {
+				return err
+	    	}    	
+	    	data, err := item.Value()
 			if err != nil {
 				log.Errorf("Error '%s' while getting data from %v\n", err, item)
 				return err
 	    	}    	
 	    	err = json.Unmarshal(data, &val)
 			if err != nil {
-				log.Errorf("Error '%s' while unparsing UUID for data: %v\n", err, data)
+				log.Errorf("Error while unparsing UUID for name: '%s' (%v)\n", avatarName, err)
 				return err
 	    	}
-			checks++	//Just to see how many checks we made, for statistical purposes
-			if avatarKey == val.UUID {
-				found = string(item.Key())
-				break
-			}
+	    	return nil
+		})	
+	} else {
+		db, err := buntdb.Open(dbNamePath)
+		checkErrPanic(err)
+		defer db.Close()
+		var data string
+		err = db.View(func(tx *buntdb.Tx) error {
+		    data, err = tx.Get(avatarName) 
+		    return err 
+		})
+    	err = json.Unmarshal([]byte(data), &val)
+		if err != nil {
+			log.Errorf("Error while unparsing UUID for name: '%s' (%v)\n", avatarName, err)
+    	}			
+	}
+	time_end := time.Now()
+	diffTime := time_end.Sub(time_start)
+	log.Debugf("Time to lookup '%s': %v\n", avatarName, diffTime)
+	if err != nil {
+		return NullUUID, ""
+	} // else:
+	return val.UUID, val.Grid
+}
+// searchKVUUID searches the KV database for an avatar key.
+func searchKVUUID(avatarKey string) (name string, grid string) {
+	time_start := time.Now()
+	checks := 0
+	var val = avatarUUID{ NullUUID, "" }
+	var found string
+	
+	if *useBadger {
+		kv, err := badger.Open(Opt)
+		checkErr(err) // should probably panic
+		itOpt := badger.DefaultIteratorOptions
+		if !*noMemory {
+			itOpt.PrefetchValues = true
+			itOpt.PrefetchSize = 1000	// attempt to get this a little bit more efficient; we have many small entries, so this is not too much
+		} else {
+			itOpt.PrefetchValues = false
 		}
-		return nil
-	})
+		txn := kv.NewTransaction(true)
+		defer txn.Discard()
+	
+		err = kv.View(func(txn *badger.Txn) error {				
+			itr := txn.NewIterator(itOpt)
+			defer itr.Close()		
+			for itr.Rewind(); itr.Valid(); itr.Next() {
+				item := itr.Item()
+				data, err := item.Value()
+				if err != nil {
+					log.Errorf("Error '%s' while getting data from %v\n", err, item)
+					return err
+		    	}    	
+		    	err = json.Unmarshal(data, &val)
+				if err != nil {
+					log.Errorf("Error '%s' while unparsing UUID for data: %v\n", err, data)
+					return err
+		    	}
+				checks++	//Just to see how many checks we made, for statistical purposes
+				if avatarKey == val.UUID {
+					found = string(item.Key())
+					break
+				}
+			}
+			return nil
+		})
+		kv.Close()
+	} else {
+		db, err := buntdb.Open(dbNamePath)
+		checkErrPanic(err)
+		err = db.View(func(tx *buntdb.Tx) error {
+			err := tx.Ascend("", func(key, value string) bool {
+		    	err = json.Unmarshal([]byte(value), &val)
+				if err != nil {
+					log.Errorf("Error '%s' while unparsing UUID for value: %v\n", err, value)
+		    	}
+				checks++	//Just to see how many checks we made, for statistical purposes
+				if avatarKey == val.UUID {
+					found = key
+					return false			
+				}
+				return true
+		    })
+		    return err
+		})
+		db.Close()	
+	}
 	time_end := time.Now()
 	diffTime := time_end.Sub(time_start)
 	log.Debugf("Made %d checks for '%s' in %v\n", checks, avatarKey, diffTime)
-	kv.Close()
 	return found, val.Grid
 }
 
@@ -368,49 +447,94 @@ func importDatabase(filename string) {
 	defer filehandler.Close()
 	gr := bzip2.NewReader(filehandler) // open bzip2 reader
 	cr := csv.NewReader(gr)  // open csv reader and feed the bzip2 reader into it
-	
-	// prepare connection to KV database
-	kv, err := badger.Open(Opt)
-	checkErrPanic(err) // should probably panic		
-	defer kv.Close()
+
+	limit := 0	// outside of for loop so that we can count how many entries we had in total
 	time_start := time.Now() // we want to get an idea on how long this takes
 	
-	limit := 0	// outside of for loop so that we can count how many entries we had in total
-
-	txn := kv.NewTransaction(true) // start new transaction; we will commit only every BATCH_BLOCK entries
-	defer txn.Discard()
-	for ;;limit++ {
-		record, err := cr.Read()
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			log.Fatal(err)
+	if *useBadger {
+		// prepare connection to KV database
+		kv, err := badger.Open(Opt)
+		checkErrPanic(err) // should probably panic		
+		defer kv.Close()	
+	
+		txn := kv.NewTransaction(true) // start new transaction; we will commit only every BATCH_BLOCK entries
+		defer txn.Discard()
+		for ;;limit++ {
+			record, err := cr.Read()
+			if err == io.EOF {
+				break
+			} else if err != nil {
+				log.Fatal(err)
+			}
+			jsonNewEntry, err := json.Marshal(avatarUUID{ record[0], "Production" }) // W-Hat keys come all from the main LL grid, known as 'Production'
+			if err != nil {
+				log.Warning(err)
+			} else {			 
+				err = txn.Set([]byte(record[1]), jsonNewEntry, 0x00)
+				if err != nil {
+				    log.Fatal(err)
+				}
+			}
+			if limit % BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
+				log.Info("Processing:", limit)
+				err = txn.Commit(nil)
+				if err != nil {
+				    log.Fatal(err)
+				}
+				txn = kv.NewTransaction(true) // start a new transaction
+				defer txn.Discard()
+			}
 		}
-		jsonNewEntry, err := json.Marshal(avatarUUID{ record[0], "Production" }) // W-Hat keys come all from the main LL grid, known as 'Production'
+		// commit last batch
+		err = txn.Commit(nil)
 		if err != nil {
-			log.Warning(err)
-		} else {			 
-			err = txn.Set([]byte(record[1]), jsonNewEntry, 0x00)
+		    log.Fatal(err)
+		}
+		kv.PurgeOlderVersions()
+	} else {
+		db, err := buntdb.Open(dbNamePath)
+		checkErrPanic(err)
+		defer db.Close()
+		
+		txn, err := db.Begin(true)
+		checkErrPanic(err)
+		//defer txn.Commit()
+		
+		// very similar to Badger code...
+		for ;;limit++ {
+			record, err := cr.Read()
+			if err == io.EOF {
+				break
+			} else if err != nil {
+				log.Fatal(err)
+			}
+			jsonNewEntry, err := json.Marshal(avatarUUID{ record[0], "Production" }) // W-Hat keys come all from the main LL grid, known as 'Production'
 			if err != nil {
-			    log.Fatal(err)
+				log.Warning(err)
+			} else {			 
+				_, _, err = txn.Set(record[1], string(jsonNewEntry), nil)
+				if err != nil {
+				    log.Fatal(err)
+				}
+			}
+			if limit % BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
+				log.Info("Processing:", limit)
+				err = txn.Commit()
+				if err != nil {
+				    log.Fatal(err)
+				}
+				txn, err = db.Begin(true)  // start a new transaction
+				checkErrPanic(err)
+				//defer txn.Commit()
 			}
 		}
-		if limit % BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
-			log.Info("Processing:", limit)
-			err = txn.Commit(nil)
-			if err != nil {
-			    log.Fatal(err)
-			}
-			txn = kv.NewTransaction(true) // start a new transaction
-			defer txn.Discard()
-		}
+		// commit last batch
+		err = txn.Commit()
+		if err != nil {
+		    log.Fatal(err)
+		}			
+		db.Shrink()
 	}
-	// commit last batch
-	err = txn.Commit(nil)
-	if err != nil {
-	    log.Fatal(err)
-	}
-	kv.PurgeOlderVersions()
 	time_end := time.Now()
 	diffTime := time_end.Sub(time_start)
 	log.Info("Total read", limit, "records (or thereabouts) in", diffTime)
