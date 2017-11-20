@@ -8,15 +8,16 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/tidwall/buntdb"
 	"github.com/dgraph-io/badger"
 	"github.com/dgraph-io/badger/options"
+	"github.com/fsnotify/fsnotify"
 	"github.com/op/go-logging"
+	"github.com/spf13/viper"
+	"github.com/tidwall/buntdb"
 	"gopkg.in/natefinch/lumberjack.v2"
 	"io"
 	"net/http"
 	"net/http/fcgi"
-	_ "net/http/pprof"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -41,9 +42,6 @@ type avatarUUID struct {
 	Grid string
 } 
 
-var BATCH_BLOCK = 100000	// how many entries to write to the Badger database as a block; the bigger, the faster, but the more memory it consumes
-							// the authors say that 100000 is way too much
-							// NOTE(gwyneth): let's see what happens with BuntDB
 /*
 				  .__			 
   _____ _____  |__| ____  
@@ -53,38 +51,90 @@ var BATCH_BLOCK = 100000	// how many entries to write to the Badger database as 
 	  \/	 \/			  \/ 
 */
 
-// some of these flags need to be global
-var noMemory, useBadger *bool
-var myDir *string
-var dbNamePath string // for BuntDB
+// Configuration options
+type goslConfigOptions struct {
+	BATCH_BLOCK *int // how many entries to write to the database as a block; the bigger, the faster, but the more memory it consumes
+	noMemory, isServer, isShell *bool
+	myDir, myPort, importFilename, database *string
+	dbNamePath string // for BuntDB
+	logFilename string	// for logs
+	maxSize, maxBackups, maxAge int // logs configuration option
+}
+
+var goslConfig goslConfigOptions
+
+// loadConfiguration reads our configuration from a config.toml file
+func loadConfiguration() {
+	fmt.Print("Reading gosl-basic configuration:")	// note that we might not have go-logging active as yet, so we use fmt
+	// Open our config file and extract relevant data from there
+	err := viper.ReadInConfig() // Find and read the config file
+	if err != nil {
+		fmt.Println("Error reading config file:", err)
+		return	// we might still get away with this!
+	}
+	viper.SetDefault("config.BATCH_BLOCK", 100000)	// NOTE(gwyneth): the authors of say that 100000 is way too much for Badger																// NOTE(gwyneth): let's see what happens with BuntDB
+	*goslConfig.BATCH_BLOCK = viper.GetInt("config.BATCH_BLOCK")
+	viper.SetDefault("config.myPort", 3000)
+	*goslConfig.myPort = viper.GetString("config.myPort")
+	viper.SetDefault("config.myDir", "slkvdb")
+	*goslConfig.myDir = viper.GetString("config.myDir")
+	viper.SetDefault("config.isServer", false)
+	*goslConfig.isServer = viper.GetBool("config.isServer")
+	viper.SetDefault("config.isShell", false)
+	*goslConfig.isShell = viper.GetBool("config.isShell")
+	viper.SetDefault("config.database", "badger")
+	*goslConfig.database = viper.GetString("config.database")
+	viper.SetDefault("config.importFilename", "name2key.csv.bz2")
+	*goslConfig.importFilename = viper.GetString("config.importFilename")
+	viper.SetDefault("config.noMemory", false)
+	*goslConfig.noMemory = viper.GetBool("config.noMemory")
+	// Logging options
+	viper.SetDefault("config.logFilename", "gosl.log")
+	goslConfig.logFilename = viper.GetString("config.logFilename")
+	viper.SetDefault("config.maxSize", 10)
+	goslConfig.maxSize = viper.GetInt("config.maxSize")
+	viper.SetDefault("config.maxBackups", 3)
+	goslConfig.maxBackups = viper.GetInt("config.maxBackups")
+	viper.SetDefault("config.maxAge", 28)
+	goslConfig.maxAge = viper.GetInt("config.maxAge")
+}
 
 // main() starts here.
 func main() {
-	// Flag setup
-	var myPort			= flag.String("port", "3000", "Server port")
-	myDir				= flag.String("dir", "slkvdb", "Directory where database files are stored")
-	var isServer		= flag.Bool("server", false, "Run as server on port " + *myPort)
-	var isShell			= flag.Bool("shell", false, "Run as an interactive shell")
-	var importFilename	= flag.String("import", "", "Import database from W-Hat (use the csv.bz2 version)")
-	useBadger 			= flag.Bool("usebadger", false, "Use Badger instead of BuntDB")
-	noMemory 			= flag.Bool("nomemory", false, "Attempt to use only disk to save memory on Badger (important for shared webservers)")
+	loadConfiguration()
+	
+	// Flag setup; it overrides (hopefully) what is in the configuration file
+	goslConfig.myPort			= flag.String("port", "3000", "Server port")
+	goslConfig.myDir			= flag.String("dir", "slkvdb", "Directory where database files are stored")
+	goslConfig.isServer			= flag.Bool("server", false, "Run as server on port " + *goslConfig.myPort)
+	goslConfig.isShell			= flag.Bool("shell", false, "Run as an interactive shell")
+	goslConfig.importFilename	= flag.String("import", "name2key.csv.bz2", "Import database from W-Hat (use the csv.bz2 version)")
+	goslConfig.database 		= flag.String("database", "badger", "Database type (currently BuntDB or Badger)")
+	goslConfig.noMemory 		= flag.Bool("nomemory", false, "Attempt to use only disk to save memory on Badger (important for shared webservers)")
+	
+	// this will allow our configuration file to be 'read on demand'
+	viper.WatchConfig()
+	viper.OnConfigChange(func(e fsnotify.Event) {
+		if *goslConfig.isServer || *goslConfig.isShell {
+			fmt.Println("Config file changed:", e.Name)	// BUG(gwyneth): FastCGI cannot write to output
+		}
+		loadConfiguration()
+	})
 	
 	// default is FastCGI
 	flag.Parse()
-	// We cannot write to stdout if we're running as FastCGI, only to logs!
 	
-	if *isServer || *isShell {
+	// NOTE(gwyneth): We cannot write to stdout if we're running as FastCGI, only to logs!
+	if *goslConfig.isServer || *goslConfig.isShell {
 		fmt.Println("gosl is starting...")	
-	} else { // FastCGI: we cannot write to stdio, we need to setup the logger so that we can write to disk
-		*noMemory = true
 	}
 	
 	// Setup the lumberjack rotating logger. This is because we need it for the go-logging logger when writing to files. (20170813)
 	rotatingLogger := &lumberjack.Logger{
-		Filename:	 "gosl.log",
-		MaxSize:	 10, // megabytes
-		MaxBackups: 3,
-		MaxAge:	 28, //days
+		Filename:	goslConfig.logFilename,
+		MaxSize:	goslConfig.maxSize, // megabytes
+		MaxBackups:	goslConfig.maxBackups,
+		MaxAge:		goslConfig.maxAge, //days
 	}
 	
 	// Set formatting for stderr and file (basically the same).
@@ -96,11 +146,11 @@ func main() {
 	backendFileLeveled 		:= logging.AddModuleLevel(backendFileFormatter)
 	backendFileLeveled.SetLevel(logging.INFO, "gosl")	// we just send debug data to logs if we run as shell
 	
-	if *isServer || *isShell {
+	if *goslConfig.isServer || *goslConfig.isShell {
 		backendStderr			:= logging.NewLogBackend(os.Stderr, "", 0)
 		backendStderrFormatter	:= logging.NewBackendFormatter(backendStderr, logFormat)
 		backendStderrLeveled 	:= logging.AddModuleLevel(backendStderrFormatter)
-		if *isShell {
+		if *goslConfig.isShell {
 			backendStderrLeveled.SetLevel(logging.DEBUG, "gosl")	// shell is meant to be for debugging mostly
 		} else {
 			backendStderrLeveled.SetLevel(logging.INFO, "gosl")
@@ -111,23 +161,23 @@ func main() {
 	}
 
 	// Check if this directory actually exists; if not, create it. Panic if something wrong happens (we cannot proceed without a valid directory for the database to be written
-	if stat, err := os.Stat(*myDir); err == nil && stat.IsDir() {
+	if stat, err := os.Stat(*goslConfig.myDir); err == nil && stat.IsDir() {
 		// path is a valid directory
-		log.Infof("Valid directory: %s\n", *myDir)
+		log.Infof("Valid directory: %s\n", *goslConfig.myDir)
 	} else {
 		// try to create directory
-		err = os.Mkdir(*myDir, 0700)
+		err = os.Mkdir(*goslConfig.myDir, 0700)
 		checkErrPanic(err) // cannot make directory, panic and exit logging what went wrong
-		log.Debugf("Created new directory: %s\n", *myDir)		
+		log.Debugf("Created new directory: %s\n", *goslConfig.myDir)		
 	}
-	if *useBadger {
+	if *goslConfig.database == "badger" {
 		Opt = badger.DefaultOptions
-		Opt.Dir = *myDir
+		Opt.Dir = *goslConfig.myDir
 		Opt.ValueDir = Opt.Dir
 		Opt.TableLoadingMode = options.MemoryMap
 		//Opt.TableLoadingMode = options.FileIO
 	}
-	if *noMemory && *useBadger {
+	if *goslConfig.noMemory && *goslConfig.database == "badger" {
 //		Opt.TableLoadingMode = options.FileIO // use standard file I/O operations for tables instead of LoadRAM
 //		Opt.TableLoadingMode = options.MemoryMap // MemoryMap indicates that that the file must be memory-mapped - https://github.com/dgraph-io/badger/issues/224#issuecomment-329643771
 		Opt.TableLoadingMode = options.FileIO
@@ -140,7 +190,7 @@ func main() {
 		Opt.NumLevelZeroTables = 10
 //		Opt.maxBatchSize =
 //		Opt.maxBatchCount =
-		BATCH_BLOCK = 10000	// try to import less at each time, it will take longer but hopefully work
+		*goslConfig.BATCH_BLOCK = 10000	// try to import less at each time, it will take longer but hopefully work
 		log.Info("Trying to avoid too much memory consumption")	
 	}
 		// Do some testing to see if the database is available				
@@ -152,7 +202,7 @@ func main() {
 	jsonTestValue, err := json.Marshal(testValue)
 	checkErrPanic(err) // something went VERY wrong
 
-	if *useBadger {
+	if *goslConfig.database == "badger" {
 		kv, err := badger.Open(Opt)
 		checkErrPanic(err) // should probably panic, cannot prep new database
 		txn := kv.NewTransaction(true)
@@ -164,11 +214,11 @@ func main() {
 		kv.Close()
 	} else {
 		/* NOTE(gwyneth): this fails because pointers to strings do not implement len(). Duh! 
-		if *myDir[len(*myDir)-1] != os.PathSeparator {
-			*myDir = append(*myDir + os.PathSeparator
+		if *goslConfig.myDir[len(*goslConfig.myDir)-1] != os.PathSeparator {
+			*goslConfig.myDir = append(*goslConfig.myDir + os.PathSeparator
 		} */
-		dbNamePath = *myDir + string(os.PathSeparator) + databaseName
-		db, err := buntdb.Open(dbNamePath)
+		goslConfig.dbNamePath = *goslConfig.myDir + string(os.PathSeparator) + databaseName
+		db, err := buntdb.Open(goslConfig.dbNamePath)
 		checkErrPanic(err)
 		err = db.Update(func(tx *buntdb.Tx) error {
 			_, _, err := tx.Set(testAvatarName, string(jsonTestValue), nil)
@@ -183,13 +233,13 @@ func main() {
 	log.Debugf("GET '%s' returned '%s' [grid '%s']\n", testAvatarName, key, grid)
 	log.Info("KV database seems fine.")
 	
-	if *importFilename != "" {
-		log.Info("Attempting to import", *importFilename, "...")
-		importDatabase(*importFilename)
+	if *goslConfig.importFilename != "" {
+		log.Info("Attempting to import", *goslConfig.importFilename, "...")
+		importDatabase(*goslConfig.importFilename)
 		log.Info("Database finished import.")
 	}
 	
-	if *isShell {
+	if *goslConfig.isShell {
 		log.Info("Starting to run as interactive shell")
 		reader := bufio.NewReader(os.Stdin)
 		fmt.Println("Ctrl-C to quit.")
@@ -221,11 +271,11 @@ func main() {
 	// set up routing.
 	// NOTE(gwyneth): one function only because FastCGI seems to have problems with multiple handlers.
 	http.HandleFunc("/", handler)
-	log.Info("Directory for database:", *myDir)
+	log.Info("Directory for database:", *goslConfig.myDir)
 	
-	if (*isServer) {
-		log.Info("Starting to run as web server on port " + *myPort)
-		err := http.ListenAndServe(":" + *myPort, nil) // set listen port
+	if (*goslConfig.isServer) {
+		log.Info("Starting to run as web server on port " + *goslConfig.myPort)
+		err := http.ListenAndServe(":" + *goslConfig.myPort, nil) // set listen port
 		checkErrPanic(err) // if it can't listen to all the above, then it has to abort anyway
 	} else {
 		// default is to run as FastCGI!
@@ -237,7 +287,7 @@ func main() {
 	}
 	// we should never have reached this point!
 	log.Error("Unknown usage! This application may run as a standalone server, as FastCGI application, or as an interactive shell")
-	if *isServer || *isShell {
+	if *goslConfig.isServer || *goslConfig.isShell {
 		flag.PrintDefaults()
 	}	
 }
@@ -271,7 +321,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			valueToInsert.Grid = r.Header.Get("X-Secondlife-Shard")
 			jsonValueToInsert, err := json.Marshal(valueToInsert)
 			checkErr(err)
-			if *useBadger {
+			if *goslConfig.database == "badger" {
 				kv, err := badger.Open(Opt)
 				checkErrPanic(err) // should probably panic
 				txn := kv.NewTransaction(true)
@@ -282,7 +332,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 				checkErrPanic(err)
 				kv.Close()
 			} else {
-				db, err := buntdb.Open(dbNamePath)
+				db, err := buntdb.Open(goslConfig.dbNamePath)
 				checkErrPanic(err)
 				defer db.Close()				
 				err = db.Update(func(tx *buntdb.Tx) error {
@@ -323,7 +373,7 @@ func searchKVname(avatarName string) (UUID string, grid string) {
 	var val = avatarUUID{ NullUUID, "" }
 	time_start := time.Now()
 	var err error // to deal with scope issues
-	if *useBadger {
+	if *goslConfig.database == "badger" {
 		kv, err := badger.Open(Opt)
 		checkErrPanic(err)
 		defer kv.Close()
@@ -345,7 +395,7 @@ func searchKVname(avatarName string) (UUID string, grid string) {
 	    	return nil
 		})	
 	} else {
-		db, err := buntdb.Open(dbNamePath)
+		db, err := buntdb.Open(goslConfig.dbNamePath)
 		checkErrPanic(err)
 		defer db.Close()
 		var data string
@@ -373,11 +423,11 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 	var val = avatarUUID{ NullUUID, "" }
 	var found string
 	
-	if *useBadger {
+	if *goslConfig.database == "badger" {
 		kv, err := badger.Open(Opt)
 		checkErr(err) // should probably panic
 		itOpt := badger.DefaultIteratorOptions
-		if !*noMemory {
+		if !*goslConfig.noMemory {
 			itOpt.PrefetchValues = true
 			itOpt.PrefetchSize = 1000	// attempt to get this a little bit more efficient; we have many small entries, so this is not too much
 		} else {
@@ -411,7 +461,7 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 		})
 		kv.Close()
 	} else {
-		db, err := buntdb.Open(dbNamePath)
+		db, err := buntdb.Open(goslConfig.dbNamePath)
 		checkErrPanic(err)
 		err = db.View(func(tx *buntdb.Tx) error {
 			err := tx.Ascend("", func(key, value string) bool {
@@ -451,7 +501,7 @@ func importDatabase(filename string) {
 	limit := 0	// outside of for loop so that we can count how many entries we had in total
 	time_start := time.Now() // we want to get an idea on how long this takes
 	
-	if *useBadger {
+	if *goslConfig.database == "badger" {
 		// prepare connection to KV database
 		kv, err := badger.Open(Opt)
 		checkErrPanic(err) // should probably panic		
@@ -475,12 +525,13 @@ func importDatabase(filename string) {
 				    log.Fatal(err)
 				}
 			}
-			if limit % BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
+			if limit % *goslConfig.BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
 				log.Info("Processing:", limit)
 				err = txn.Commit(nil)
 				if err != nil {
 				    log.Fatal(err)
 				}
+				runtime.GC()
 				txn = kv.NewTransaction(true) // start a new transaction
 				defer txn.Discard()
 			}
@@ -492,7 +543,7 @@ func importDatabase(filename string) {
 		}
 		kv.PurgeOlderVersions()
 	} else {
-		db, err := buntdb.Open(dbNamePath)
+		db, err := buntdb.Open(goslConfig.dbNamePath)
 		checkErrPanic(err)
 		defer db.Close()
 		
@@ -517,12 +568,13 @@ func importDatabase(filename string) {
 				    log.Fatal(err)
 				}
 			}
-			if limit % BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
+			if limit % *goslConfig.BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
 				log.Info("Processing:", limit)
 				err = txn.Commit()
 				if err != nil {
 				    log.Fatal(err)
 				}
+				runtime.GC()
 				txn, err = db.Begin(true)  // start a new transaction
 				checkErrPanic(err)
 				//defer txn.Commit()
