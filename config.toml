@@ -1,14 +1,20 @@
 [config]
-BATCH_BLOCK = 100000
-myPort = 3000
-myDir = "slkvdb"
-isServer= false
-isShell = false
-database = "badger"
+BATCH_BLOCK	= 100000
+myPort		= 3000
+myDir		= "slkvdb"
+isServer	= false
+isShell		= false
+database	= "badger"
 
 [options]
 importFilename = "name2key.csv.bz2"
-noMemory = false
+noMemory	= true # usually necessary for FastCGI configurations
 
 [BuntDB]
-dbNamePath = ""
+dbNamePath	= ""
+
+[log]
+Filename	= "gosl.log"
+MaxSize		= 10 # MBytes
+MaxBackups	= 3,
+MaxAge		= 28, # days
