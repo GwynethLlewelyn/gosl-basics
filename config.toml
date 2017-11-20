@@ -1,0 +1,14 @@
+[config]
+BATCH_BLOCK = 100000
+myPort = 3000
+myDir = "slkvdb"
+isServer= false
+isShell = false
+database = "badger"
+
+[options]
+importFilename = "name2key.csv.bz2"
+noMemory = false
+
+[BuntDB]
+dbNamePath = ""
