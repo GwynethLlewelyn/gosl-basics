@@ -53,7 +53,7 @@ type avatarUUID struct {
 
 // Configuration options
 type goslConfigOptions struct {
-	BATCH_BLOCK *int // how many entries to write to the database as a block; the bigger, the faster, but the more memory it consumes
+	BATCH_BLOCK int // how many entries to write to the database as a block; the bigger, the faster, but the more memory it consumes
 	noMemory, isServer, isShell *bool
 	myDir, myPort, importFilename, database *string
 	dbNamePath string // for BuntDB
@@ -73,7 +73,7 @@ func loadConfiguration() {
 		return	// we might still get away with this!
 	}
 	viper.SetDefault("config.BATCH_BLOCK", 100000)	// NOTE(gwyneth): the authors of say that 100000 is way too much for Badger																// NOTE(gwyneth): let's see what happens with BuntDB
-	*goslConfig.BATCH_BLOCK = viper.GetInt("config.BATCH_BLOCK")
+	goslConfig.BATCH_BLOCK = viper.GetInt("config.BATCH_BLOCK")
 	viper.SetDefault("config.myPort", 3000)
 	*goslConfig.myPort = viper.GetString("config.myPort")
 	viper.SetDefault("config.myDir", "slkvdb")
@@ -84,7 +84,7 @@ func loadConfiguration() {
 	*goslConfig.isShell = viper.GetBool("config.isShell")
 	viper.SetDefault("config.database", "badger")
 	*goslConfig.database = viper.GetString("config.database")
-	viper.SetDefault("config.importFilename", "name2key.csv.bz2")
+	viper.SetDefault("config.importFilename", "") // must be empty by default
 	*goslConfig.importFilename = viper.GetString("config.importFilename")
 	viper.SetDefault("config.noMemory", false)
 	*goslConfig.noMemory = viper.GetBool("config.noMemory")
@@ -101,9 +101,7 @@ func loadConfiguration() {
 
 // main() starts here.
 func main() {
-	loadConfiguration()
-	
-	// Flag setup; it overrides (hopefully) what is in the configuration file
+	// Flag setup; can be overridden by config file (I need to fix this to be the oher way round).
 	goslConfig.myPort			= flag.String("port", "3000", "Server port")
 	goslConfig.myDir			= flag.String("dir", "slkvdb", "Directory where database files are stored")
 	goslConfig.isServer			= flag.Bool("server", false, "Run as server on port " + *goslConfig.myPort)
@@ -112,6 +110,16 @@ func main() {
 	goslConfig.database 		= flag.String("database", "badger", "Database type (currently BuntDB or Badger)")
 	goslConfig.noMemory 		= flag.Bool("nomemory", false, "Attempt to use only disk to save memory on Badger (important for shared webservers)")
 	
+	// Config viper, which reads in the configuration file every time it's needed.
+	// Note that we need some hard-coded variables for the path and config file name.
+	viper.SetConfigName("config")
+	viper.SetConfigType("toml") // just to make sure; it's the same format as OpenSimulator (or MySQL) config files
+	viper.AddConfigPath("$HOME/go/src/gosl-basics/") // that's how I have it
+	viper.AddConfigPath("$HOME/go/src/git.gwynethllewelyn.net/GwynethLlewelyn/gosl-basics/") // that's how you'll have it
+	viper.AddConfigPath(".")               // optionally look for config in the working directory
+	
+	loadConfiguration()
+
 	// this will allow our configuration file to be 'read on demand'
 	viper.WatchConfig()
 	viper.OnConfigChange(func(e fsnotify.Event) {
@@ -120,7 +128,7 @@ func main() {
 		}
 		loadConfiguration()
 	})
-	
+		
 	// default is FastCGI
 	flag.Parse()
 	
@@ -190,14 +198,14 @@ func main() {
 		Opt.NumLevelZeroTables = 10
 //		Opt.maxBatchSize =
 //		Opt.maxBatchCount =
-		*goslConfig.BATCH_BLOCK = 10000	// try to import less at each time, it will take longer but hopefully work
+		goslConfig.BATCH_BLOCK = 10000	// try to import less at each time, it will take longer but hopefully work
 		log.Info("Trying to avoid too much memory consumption")	
 	}
 		// Do some testing to see if the database is available				
 	const testAvatarName = "Nobody Here"
 	var err error
 
-	log.Info("gosl started and logging is set up. Proceeding to test KV database.")
+	log.Info("gosl started and logging is set up. Proceeding to test database (" + *goslConfig.database + ") at " + *goslConfig.myDir)
 	var testValue = avatarUUID{ NullUUID, "all grids" }
 	jsonTestValue, err := json.Marshal(testValue)
 	checkErrPanic(err) // something went VERY wrong
@@ -212,7 +220,7 @@ func main() {
 		checkErrPanic(err)
 		log.Debugf("SET %+v (json: %v)\n", testValue, string(jsonTestValue))
 		kv.Close()
-	} else {
+	} else if *goslConfig.database == "buntdb" {
 		/* NOTE(gwyneth): this fails because pointers to strings do not implement len(). Duh! 
 		if *goslConfig.myDir[len(*goslConfig.myDir)-1] != os.PathSeparator {
 			*goslConfig.myDir = append(*goslConfig.myDir + os.PathSeparator
@@ -331,7 +339,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 				err = txn.Commit(nil)
 				checkErrPanic(err)
 				kv.Close()
-			} else {
+			} else if *goslConfig.database == "buntdb" {
 				db, err := buntdb.Open(goslConfig.dbNamePath)
 				checkErrPanic(err)
 				defer db.Close()				
@@ -394,7 +402,7 @@ func searchKVname(avatarName string) (UUID string, grid string) {
 	    	}
 	    	return nil
 		})	
-	} else {
+	} else if *goslConfig.database == "buntdb" {
 		db, err := buntdb.Open(goslConfig.dbNamePath)
 		checkErrPanic(err)
 		defer db.Close()
@@ -525,7 +533,7 @@ func importDatabase(filename string) {
 				    log.Fatal(err)
 				}
 			}
-			if limit % *goslConfig.BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
+			if limit % goslConfig.BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
 				log.Info("Processing:", limit)
 				err = txn.Commit(nil)
 				if err != nil {
@@ -568,7 +576,7 @@ func importDatabase(filename string) {
 				    log.Fatal(err)
 				}
 			}
-			if limit % *goslConfig.BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
+			if limit % goslConfig.BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
 				log.Info("Processing:", limit)
 				err = txn.Commit()
 				if err != nil {
