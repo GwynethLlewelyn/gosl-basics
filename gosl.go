@@ -184,24 +184,26 @@ func main() {
 		Opt.ValueDir = Opt.Dir
 		Opt.TableLoadingMode = options.MemoryMap
 		//Opt.TableLoadingMode = options.FileIO
+	
+		if *goslConfig.noMemory  {
+	//		Opt.TableLoadingMode = options.FileIO // use standard file I/O operations for tables instead of LoadRAM
+	//		Opt.TableLoadingMode = options.MemoryMap // MemoryMap indicates that that the file must be memory-mapped - https://github.com/dgraph-io/badger/issues/224#issuecomment-329643771
+			Opt.TableLoadingMode = options.FileIO
+	//		Opt.ValueLogFileSize = 1048576
+			Opt.MaxTableSize = 1048576 // * 12
+			Opt.LevelSizeMultiplier = 1
+			Opt.NumMemtables = 1
+	//		Opt.MaxLevels = 10
+	//		Opt.SyncWrites = false
+	//		Opt.NumCompactors = 10
+	//		Opt.NumLevelZeroTables = 10
+	//		Opt.maxBatchSize =
+	//		Opt.maxBatchCount =
+			goslConfig.BATCH_BLOCK = 1000	// try to import less at each time, it will take longer but hopefully work
+			log.Info("Trying to avoid too much memory consumption")	
+		}
 	}
-	if *goslConfig.noMemory && *goslConfig.database == "badger" {
-//		Opt.TableLoadingMode = options.FileIO // use standard file I/O operations for tables instead of LoadRAM
-//		Opt.TableLoadingMode = options.MemoryMap // MemoryMap indicates that that the file must be memory-mapped - https://github.com/dgraph-io/badger/issues/224#issuecomment-329643771
-		Opt.TableLoadingMode = options.FileIO
-//		Opt.ValueLogFileSize = 1048576
-		Opt.MaxTableSize = 1048576 * 12
-		Opt.NumMemtables = 1
-		Opt.MaxLevels = 10
-		Opt.SyncWrites = false
-		Opt.NumCompactors = 10
-		Opt.NumLevelZeroTables = 10
-//		Opt.maxBatchSize =
-//		Opt.maxBatchCount =
-		goslConfig.BATCH_BLOCK = 10000	// try to import less at each time, it will take longer but hopefully work
-		log.Info("Trying to avoid too much memory consumption")	
-	}
-		// Do some testing to see if the database is available				
+	// Do some testing to see if the database is available				
 	const testAvatarName = "Nobody Here"
 	var err error
 
@@ -602,7 +604,7 @@ func importDatabase(filename string) {
 	log.Info("Total read", limit, "records (or thereabouts) in", diffTime)
 }
 
-// NOTE(gwyneth):Auxiliary functions which I'm always using...
+// NOTE(gwyneth): Auxiliary functions which I'm always using...
 
 // checkErrPanic logs a fatal error and panics.
 func checkErrPanic(err error) {
