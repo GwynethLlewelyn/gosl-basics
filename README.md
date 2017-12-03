@@ -26,12 +26,17 @@ Requirements:
 
 Taking that into account, all you need now to do is add the external packages used by this project:
 ```
-go get github.com/dgraph-io/badger
-go get github.com/dgraph-io/badger/table
-go get github.com/op/go-logging
-go get gopkg.in/natefinch/lumberjack.v2
+go get	"github.com/dgraph-io/badger"
+go get	"github.com/dgraph-io/badger/options"
+go get	"github.com/fsnotify/fsnotify"
+go get	"github.com/op/go-logging"
+go get	"github.com/spf13/viper"
+go get	"github.com/syndtr/goleveldb/leveldb"
+go get	"github.com/syndtr/goleveldb/leveldb/util"
+go get	"github.com/tidwall/buntdb"
+go get	"gopkg.in/natefinch/lumberjack.v2"
 ```
-which are, respectively, a very fast key/value database (and some extra variables defined elsewhere); a powerful logging system; and a way to rotate logs (a lumberjack... chops down logs... get it? :) Aye, Gophers have a sense of humour).
+which are, respectively, 3 different key/value databases (and some extra variables defined elsewhere); a powerful logging system; and a way to rotate logs (a lumberjack... chops down logs... get it? :) Aye, Gophers have a sense of humour).
 
 Finally, `go get git.gwynethllewelyn.net/GwynethLlewelyn/gosl-basics.git` and you _ought_ to have a binary executable file in `~/go/bin` called `gosl-basics`. Just run it!
 
@@ -40,12 +45,14 @@ Then grab the two LSL scripts, `query.lsl` and `touch.lsl`. The first runs queri
 ## Configuration
 You can run the executable either as:
 
+	-database string
+		Database type (badger, buntdb, leveldb) (default "badger")
 	-dir string
 		Directory where database files are stored (default "slkvdb")
 	-import string
-		Import database from W-Hat (use the csv.bz2 version)
+		Import database from W-Hat (use the csv.bz2 version) (default "name2key.csv.bz2")
 	-nomemory
-		Attempt to use only disk to save memory (important for shared webservers)
+		Attempt to use only disk to save memory on Badger (important for shared webservers)
 	-port string
 		Server port (default "3000")
 	-server
