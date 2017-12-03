@@ -109,7 +109,7 @@ func main() {
 	goslConfig.isServer			= flag.Bool("server", false, "Run as server on port " + *goslConfig.myPort)
 	goslConfig.isShell			= flag.Bool("shell", false, "Run as an interactive shell")
 	goslConfig.importFilename	= flag.String("import", "name2key.csv.bz2", "Import database from W-Hat (use the csv.bz2 version)")
-	goslConfig.database 		= flag.String("database", "badger", "Database type (currently BuntDB or Badger)")
+	goslConfig.database 		= flag.String("database", "badger", "Database type (badger, buntdb, leveldb)")
 	goslConfig.noMemory 		= flag.Bool("nomemory", false, "Attempt to use only disk to save memory on Badger (important for shared webservers)")
 	
 	// Config viper, which reads in the configuration file every time it's needed.
