@@ -187,8 +187,8 @@ func main() {
 	
 		if *goslConfig.noMemory  {
 	//		Opt.TableLoadingMode = options.FileIO // use standard file I/O operations for tables instead of LoadRAM
-	//		Opt.TableLoadingMode = options.MemoryMap // MemoryMap indicates that that the file must be memory-mapped - https://github.com/dgraph-io/badger/issues/224#issuecomment-329643771
-			Opt.TableLoadingMode = options.FileIO
+			Opt.TableLoadingMode = options.MemoryMap // MemoryMap indicates that that the file must be memory-mapped - https://github.com/dgraph-io/badger/issues/224#issuecomment-329643771
+	//		Opt.TableLoadingMode = options.FileIO
 	//		Opt.ValueLogFileSize = 1048576
 			Opt.MaxTableSize = 1048576 // * 12
 			Opt.LevelSizeMultiplier = 1
