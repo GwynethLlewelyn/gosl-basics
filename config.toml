@@ -4,7 +4,7 @@ myPort		= 3000
 myDir		= "slkvdb"
 isServer	= false
 isShell		= false
-database	= "badger" # badger, buntdb, leveldb
+database	= "leveldb" # badger, buntdb, leveldb
 
 [options]
 importFilename = "" # set to "name2key.csv.bz2" (or any similar name) to actually do an import
