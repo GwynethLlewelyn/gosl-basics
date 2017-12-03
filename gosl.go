@@ -13,6 +13,8 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/op/go-logging"
 	"github.com/spf13/viper"
+	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/util"
 	"github.com/tidwall/buntdb"
 	"gopkg.in/natefinch/lumberjack.v2"
 	"io"
@@ -82,7 +84,7 @@ func loadConfiguration() {
 	*goslConfig.isServer = viper.GetBool("config.isServer")
 	viper.SetDefault("config.isShell", false)
 	*goslConfig.isShell = viper.GetBool("config.isShell")
-	viper.SetDefault("config.database", "badger")
+	viper.SetDefault("config.database", "badger") // currently, badger, boltdb, leveldb
 	*goslConfig.database = viper.GetString("config.database")
 	viper.SetDefault("config.importFilename", "") // must be empty by default
 	*goslConfig.importFilename = viper.GetString("config.importFilename")
@@ -220,7 +222,7 @@ func main() {
 		checkErrPanic(err)
 		err = txn.Commit(nil)
 		checkErrPanic(err)
-		log.Debugf("SET %+v (json: %v)\n", testValue, string(jsonTestValue))
+		log.Debugf("badger SET %+v (json: %v)\n", testValue, string(jsonTestValue))
 		kv.Close()
 	} else if *goslConfig.database == "buntdb" {
 		/* NOTE(gwyneth): this fails because pointers to strings do not implement len(). Duh! 
@@ -235,10 +237,18 @@ func main() {
 			return err
 		})
 		checkErr(err)
-		log.Debugf("SET %+v (json: %v)\n", testValue, string(jsonTestValue))
+		log.Debugf("buntdb SET %+v (json: %v)\n", testValue, string(jsonTestValue))
+		db.Close()
+	} else if *goslConfig.database == "leveldb" {
+		goslConfig.dbNamePath = *goslConfig.myDir + string(os.PathSeparator) + databaseName
+		db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
+		checkErrPanic(err)
+		err = db.Put([]byte(testAvatarName), jsonTestValue, nil)
+		checkErrPanic(err)
+		log.Debugf("leveldb SET %+v (json: %v)\n", testValue, string(jsonTestValue))
 		db.Close()
 	}
-	// common to both databases:
+	// common to all databases:
 	key, grid := searchKVname(testAvatarName)
 	log.Debugf("GET '%s' returned '%s' [grid '%s']\n", testAvatarName, key, grid)
 	log.Info("KV database seems fine.")
@@ -350,6 +360,12 @@ func handler(w http.ResponseWriter, r *http.Request) {
 					return err
 				})
 				checkErr(err)
+			} else if *goslConfig.database == "leveldb" {
+				db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
+				checkErrPanic(err)
+				err = db.Put([]byte(name), jsonValueToInsert, nil)
+				checkErrPanic(err)
+				db.Close()				
 			}
 			messageToSL += "Added new entry for '" + name + "' which is: " + valueToInsert.UUID + " from grid: '" + valueToInsert.Grid + "'"
 		} else {
@@ -417,10 +433,21 @@ func searchKVname(avatarName string) (UUID string, grid string) {
 		if err != nil {
 			log.Errorf("Error while unparsing UUID for name: '%s' (%v)\n", avatarName, err)
     	}			
+	} else if *goslConfig.database == "leveldb" {
+		db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
+		checkErrPanic(err)
+		defer db.Close()		
+		data, err := db.Get([]byte(avatarName), nil)
+		if err != nil {
+			log.Errorf("Error while getting UUID for name: '%s' (%v)\n", avatarName, err)
+    	} else {
+	    	err = json.Unmarshal(data, &val)
+			if err != nil {
+				log.Errorf("Error while unparsing UUID for name: '%s' (%v)\n", avatarName, err)
+    		}
+    	}			
 	}
-	time_end := time.Now()
-	diffTime := time_end.Sub(time_start)
-	log.Debugf("Time to lookup '%s': %v\n", avatarName, diffTime)
+	log.Debugf("Time to lookup '%s': %v\n", avatarName, time.Since(time_start))
 	if err != nil {
 		return NullUUID, ""
 	} // else:
@@ -472,7 +499,7 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 			return nil
 		})
 		kv.Close()
-	} else {
+	} else if *goslConfig.database == "buntdb" {
 		db, err := buntdb.Open(goslConfig.dbNamePath)
 		checkErrPanic(err)
 		err = db.View(func(tx *buntdb.Tx) error {
@@ -491,10 +518,31 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 		    return err
 		})
 		db.Close()	
+	} else if *goslConfig.database == "leveldb" {
+		db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
+		checkErrPanic(err)
+		iter := db.NewIterator(nil, nil)
+		for iter.Next() {
+			// Remember that the contents of the returned slice should not be modified, and
+			// only valid until the next call to Next.
+			key := iter.Key()
+			value := iter.Value()
+	    	err = json.Unmarshal(value, &val)
+			if err != nil {
+				log.Errorf("Error '%s' while unparsing UUID for data: %v\n", err, value)
+				continue // a bit insane, but at least we will skip a few broken records 
+	    	}
+			checks++	//Just to see how many checks we made, for statistical purposes
+			if avatarKey == val.UUID {
+				found = string(key)
+				break
+			}
+		}
+		iter.Release()
+		err = iter.Error()
+		db.Close()
 	}
-	time_end := time.Now()
-	diffTime := time_end.Sub(time_start)
-	log.Debugf("Made %d checks for '%s' in %v\n", checks, avatarKey, diffTime)
+	log.Debugf("Made %d checks for '%s' in %v\n", checks, avatarKey, time.Since(time_start))
 	return found, val.Grid
 }
 
@@ -554,7 +602,7 @@ func importDatabase(filename string) {
 		    log.Fatal(err)
 		}
 		kv.PurgeOlderVersions()
-	} else {
+	} else if *goslConfig.database == "buntdb" {
 		db, err := buntdb.Open(goslConfig.dbNamePath)
 		checkErrPanic(err)
 		defer db.Close()
@@ -571,7 +619,7 @@ func importDatabase(filename string) {
 			} else if err != nil {
 				log.Fatal(err)
 			}
-			jsonNewEntry, err := json.Marshal(avatarUUID{ record[0], "Production" }) // W-Hat keys come all from the main LL grid, known as 'Production'
+			jsonNewEntry, err := json.Marshal(avatarUUID{ record[0], "Production" })
 			if err != nil {
 				log.Warning(err)
 			} else {			 
@@ -598,10 +646,45 @@ func importDatabase(filename string) {
 		    log.Fatal(err)
 		}			
 		db.Shrink()
+	} else if *goslConfig.database == "leveldb" {
+		db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
+		checkErrPanic(err)
+		defer db.Close()
+		batch := new(leveldb.Batch)
+
+		for ;;limit++ {
+			record, err := cr.Read()
+			if err == io.EOF {
+				break
+			} else if err != nil {
+				log.Fatal(err)
+			}
+			jsonNewEntry, err := json.Marshal(avatarUUID{ record[0], "Production" })
+			if err != nil {
+				log.Warning(err)
+			} else {
+				batch.Put([]byte(record[1]), jsonNewEntry)
+			}
+			if limit % goslConfig.BATCH_BLOCK == 0 && limit != 0 {
+				log.Info("Processing:", limit)		
+				err = db.Write(batch, nil)
+				if err != nil {
+				    log.Fatal(err)
+				}
+				batch.Reset()	// unlike the others, we don't need to create a new batch every time
+				runtime.GC()	// it never hurts...
+			}
+		}
+		// commit last batch
+		err = db.Write(batch, nil)
+		if err != nil {
+		    log.Fatal(err)
+		}
+		batch.Reset()	// reset it and let the garbage collector run
+		runtime.GC()
+		db.CompactRange(util.Range{ nil, nil })	
 	}
-	time_end := time.Now()
-	diffTime := time_end.Sub(time_start)
-	log.Info("Total read", limit, "records (or thereabouts) in", diffTime)
+	log.Info("Total read", limit, "records (or thereabouts) in", time.Since(time_start))
 }
 
 // NOTE(gwyneth): Auxiliary functions which I'm always using...
