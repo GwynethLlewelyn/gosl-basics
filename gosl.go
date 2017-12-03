@@ -391,7 +391,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return	
 	}	
 	w.WriteHeader(http.StatusOK)
-	w.Header().Set("Content-type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	fmt.Fprintf(w, messageToSL)
 }
 // searchKVname searches the KV database for an avatar name.
