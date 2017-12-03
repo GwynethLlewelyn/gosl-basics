@@ -1,3 +1,5 @@
+// gosl_test just does some simple mmap tests for Badger.
+// You can safely ignore it for now.
 package main
 
 import "os"
