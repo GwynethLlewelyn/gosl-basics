@@ -191,7 +191,7 @@ func main() {
 		Opt.TableLoadingMode = options.FileIO
 //		Opt.ValueLogFileSize = 1048576
 		Opt.MaxTableSize = 1048576 * 12
-		Opt.NumMemtables = 0
+		Opt.NumMemtables = 1
 		Opt.MaxLevels = 10
 		Opt.SyncWrites = false
 		Opt.NumCompactors = 10
@@ -214,7 +214,7 @@ func main() {
 		kv, err := badger.Open(Opt)
 		checkErrPanic(err) // should probably panic, cannot prep new database
 		txn := kv.NewTransaction(true)
-		err = txn.Set([]byte(testAvatarName), jsonTestValue, 0x00)
+		err = txn.Set([]byte(testAvatarName), jsonTestValue)
 		checkErrPanic(err)
 		err = txn.Commit(nil)
 		checkErrPanic(err)
@@ -334,7 +334,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 				checkErrPanic(err) // should probably panic
 				txn := kv.NewTransaction(true)
 				defer txn.Discard()
-				err = txn.Set([]byte(name), jsonValueToInsert, 0x00)
+				err = txn.Set([]byte(name), jsonValueToInsert)
 				checkErrPanic(err)
 				err = txn.Commit(nil)
 				checkErrPanic(err)
@@ -435,12 +435,14 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 		kv, err := badger.Open(Opt)
 		checkErr(err) // should probably panic
 		itOpt := badger.DefaultIteratorOptions
+/*
 		if !*goslConfig.noMemory {
 			itOpt.PrefetchValues = true
 			itOpt.PrefetchSize = 1000	// attempt to get this a little bit more efficient; we have many small entries, so this is not too much
 		} else {
-			itOpt.PrefetchValues = false
-		}
+*/
+			itOpt.PrefetchValues = false // allegedly this is supposed to be WAY faster...
+// 		}
 		txn := kv.NewTransaction(true)
 		defer txn.Discard()
 	
@@ -528,7 +530,7 @@ func importDatabase(filename string) {
 			if err != nil {
 				log.Warning(err)
 			} else {			 
-				err = txn.Set([]byte(record[1]), jsonNewEntry, 0x00)
+				err = txn.Set([]byte(record[1]), jsonNewEntry)
 				if err != nil {
 				    log.Fatal(err)
 				}
