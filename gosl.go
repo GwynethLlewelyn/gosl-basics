@@ -6,7 +6,7 @@ import (
 	"compress/bzip2"
 	"encoding/csv"
 	"encoding/json"
-	"flag"
+	flag "github.com/spf13/pflag"
 	"fmt"
 	"github.com/dgraph-io/badger"
 	"github.com/dgraph-io/badger/options"
@@ -121,6 +121,9 @@ func main() {
 	viper.AddConfigPath(".")               // optionally look for config in the working directory
 	
 	loadConfiguration()
+	// default is FastCGI
+	flag.Parse()
+	viper.BindPFlags(flag.CommandLine)
 
 	// this will allow our configuration file to be 'read on demand'
 	viper.WatchConfig()
@@ -130,9 +133,6 @@ func main() {
 		}
 		loadConfiguration()
 	})
-		
-	// default is FastCGI
-	flag.Parse()
 	
 	// NOTE(gwyneth): We cannot write to stdout if we're running as FastCGI, only to logs!
 	if *goslConfig.isServer || *goslConfig.isShell {

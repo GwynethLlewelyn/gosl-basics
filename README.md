@@ -24,42 +24,37 @@ Requirements:
 - You need to have [Go](https://golang.org) installed and configured properly
 - Your computer/server needs to have a publicly accessible IP (and set it up with a **dynamic DNS provider** such as [no-ip.com](https://www.noip.com/remote-access)); you _can_ run it from home if you wish
 
-Taking that into account, all you need now to do is add the external packages used by this project:
-```
-go get	"github.com/dgraph-io/badger"
-go get	"github.com/dgraph-io/badger/options"
-go get	"github.com/fsnotify/fsnotify"
-go get	"github.com/op/go-logging"
-go get	"github.com/spf13/viper"
-go get	"github.com/syndtr/goleveldb/leveldb"
-go get	"github.com/syndtr/goleveldb/leveldb/util"
-go get	"github.com/tidwall/buntdb"
-go get	"gopkg.in/natefinch/lumberjack.v2"
-```
-which are, respectively, 3 different key/value databases (and some extra variables defined elsewhere); a powerful logging system; and a way to rotate logs (a lumberjack... chops down logs... get it? :) Aye, Gophers have a sense of humour).
+Finally, `go get git.gwynethllewelyn.net/GwynethLlewelyn/gosl-basics.git`, and you _ought_ to have a binary executable file in `~/go/bin` called `gosl-basics.git`. Just run it!
 
-Finally, `go get git.gwynethllewelyn.net/GwynethLlewelyn/gosl-basics.git` and you _ought_ to have a binary executable file in `~/go/bin` called `gosl-basics`. Just run it!
+Then grab the two LSL scripts, `query.lsl` and `touch.lsl`, which ought to be in `~go/src/git.gwynethllewelyn.net/GwynethLlewelyn/gosl-basics`. The first runs queries: you touch to activate it, write the name of an avatar in chat using '/5 firstname lastname', and it replies with the avatar key (after a timeout, the script resets, giving another person a chance to try it out). The second script is to be placed on anything touchable to grab avatar names and keys and send it to your own database. You can, of course, use other methods to grab those; as an exercise, use a Sensor instead, or — even better and consuming much less resources — use a transparent, phantom prim across a place where people have no choice but to go through, and register names & keys as avatars 'bump' into that prim! There are more exotic alternatives, such as registering the name & key when an avatar sits on the prim; or using a llCastRay to figure out if there is anybody nearby. Lots of possibilities! :-) 
 
-Then grab the two LSL scripts, `query.lsl` and `touch.lsl`. The first runs queries: you touch to activate it, write the name of an avatar in chat using '/5 firstname lastname', and it replies with the avatar key (after a timeout, the script resets, giving another person a chance to try it out). The second script is to be placed on anything touchable to grab avatar names and keys and send it to your own database. You can, of course, use other methods to grab those; as an exercise, use a Sensor instead, or — even better and consuming much less resources — use a transparent, phantom prim across a place where people have no choice but to go through, and register names & keys as avatars 'bump' into that prim! There are more exotic alternatives, such as registering the name & key when an avatar sits on the prim; or using a llCastRay to figure out if there is anybody nearby. Lots of possibilities! :-) 
+If something went wrong, you might need to download all external packages manually. Theoretically, the `go get` command is supposed to be clever enough to figure out everything it needs and download _everything_ automatically, but we all know how complex systems manage to fail, don't we? So, if needed, these are all the external packages (i.e. not part of the standard library) to be downloaded:
+
+	go get	"github.com/spf13/pflag"
+	go get	"github.com/dgraph-io/badger"
+	go get	"github.com/dgraph-io/badger/options"
+	go get	"github.com/fsnotify/fsnotify"
+	go get	"github.com/op/go-logging"
+	go get	"github.com/spf13/viper"
+	go get	"github.com/syndtr/goleveldb/leveldb"
+	go get	"github.com/syndtr/goleveldb/leveldb/util"
+	go get	"github.com/tidwall/buntdb"
+	go get	"gopkg.in/natefinch/lumberjack.v2"
+
+These are for 3 different key/value databases; handling command-line flags and a configuration file; a powerful logging system; and a way to rotate logs (a lumberjack... chops down logs... get it? :) Aye, Gophers have a sense of humour).
+
 
 ## Configuration
 You can run the executable either as:
 
-	-database string
-		Database type (badger, buntdb, leveldb) (default "badger")
-	-dir string
-		Directory where database files are stored (default "slkvdb")
-	-import string
-		Import database from W-Hat (use the csv.bz2 version) (default "name2key.csv.bz2")
-	-nomemory
-		Attempt to use only disk to save memory on Badger (important for shared webservers)
-	-port string
-		Server port (default "3000")
-	-server
-		Run as server on port 3000
-	-shell
-		Run as an interactive shell
-	 
+      --database string   Database type (badger, buntdb, leveldb) (default "badger")
+      --dir string        Directory where database files are stored (default "slkvdb")
+      --import string     Import database from W-Hat (use the csv.bz2 version) (default "name2key.csv.bz2")
+      --nomemory          Attempt to use only disk to save memory on Badger (important for shared webservers)
+      --port string       Server port (default "3000")
+      --server            Run as server on port 3000
+      --shell             Run as an interactive shell
+      	 
 Basically, if you are running your own server (possibly at home!), you only need to run `gosl-basics -server`. You don't need to set up Apache or nginx or any other third-party software; `gosl-basics` is a fully standalone application and does not depend on anything.
 
 If you're using a shared web server, like the ones provided by [Dreamhost](https://dreamhost.com), then you will very likely want to run `gosl-basics` as a FastCGI application. Why? Well, Dreamhost's Terms of Service explicitly forbid any application to be run all the time (to conserve memory, CPU slices, and, well, open ports). Instead, they offer the ability to run applications as FastCGI applications instead (under their own Apache). This is actually a very cool interface (as opposed to the ancient, non-fast CGI...) allowing parts of the setup of the application to be done when it is called the first time, and then launch requests on demand. _If_ there is a _lot_ of traffic, the application will actually remain active in memory/CPU for a long time! If it only gets sporadic calls once in a while, well, in that case, the application gets removed from memory until someone calls the URL again. I have not tested exhaustively, and this will certainly depend from provider to provider, but Dreamhost seems to allow the application to remain active in memory and in the process space for 30-60 seconds.
@@ -72,11 +67,11 @@ For FastCGI: If your base URL (i.e. pointing to the directory where you have ins
 
 Note that the first time ever the application runs, it will check if the database directory exists, and if not, it will attempt to create it (and panic if it cannot create it, due to permissions — basically, if it can't create a directory, it won't be able to create the database files either). You can define a different location for the database; this might be important when using FastCGI on a shared server, because you might wish to use a private area of your web server, so that it cannot be directly accessed.
 
-The `-shell` switch is mostly meant for debugging, namely, to figure out if the database was loaded correctly (see below) and that you can query for avatar names and/or UUIDs to see if they're in the database. Remember to run from the same place where the database resides (or pass the appropriate `-dir`command). Also, you will get extra debugging messages.
+The `--shell` switch is mostly meant for debugging, namely, to figure out if the database was loaded correctly (see below) and that you can query for avatar names and/or UUIDs to see if they're in the database. Remember to run from the same place where the database resides (or pass the appropriate `--dir`command). Also, you will get extra debugging messages.
 
-The `-nomemory` switch may seem weird, but in some scenarios, like shared servers with FastCGI, the actual memory consumption may be limited, so this attempts to reduce the amount of necessary memory (things will run much slower, though; the good news is that there is _some_ caching).
+The `--nomemory` switch may seem weird, but in some scenarios, like shared servers with FastCGI and using the Badger database, the actual memory consumption may be limited, so this attempts to reduce the amount of necessary memory (things will run much slower, though; the good news is that there is _some_ caching).
 
-See below for instructions for importing CSV bzip2'ed databases using `-import`. The CSV file format is one pair **UUID,Avatar Name** per line, and all of that bzip2'ed. 
+See below for instructions for importing CSV bzip2'ed databases using `--import`. The CSV file format is one pair **UUID,Avatar Name** per line, and all of that bzip2'ed. 
 
 ## Limitations
 
@@ -84,7 +79,7 @@ I found that somehow the standard FastCGI package in Go seems to be limited to j
 
 Note that the current version can be used as a direct replacement for [W-Hat's name2key](http://w-hat.com/#name2key). There is now a 'compatibility mode' with W-Hat: if on the calling URL the extra parameter `"compat=false"` is passed, then cute messages are sent back; if not, then it just sends back the UUID (or the avatar name). Further compatibility with W-Hat's database is not built-in.
 
-To actually _use_ the W-Hat database, you need to download it first and import it. This means using the `-import` command (use the `name2key.csv.bz2`version). W-Hat still updates that database daily, so, with some clever `cron` magic, you might be able to get a fresh copy every day to import. Note that the database is supposed to be unique by name (and the UUIDs are not supposed to change): that means that you can import the 'new' version over an 'old' version, and only the relevant entries will be changed. Also, if you happen to have captured new entries (not yet existing on W-Hat's database) then these will _not_ be overwritten (or deleted) with a new import. To delete an old database, just delete the directory it is in.
+To actually _use_ the W-Hat database, you need to download it first and import it. This means using the `--import` command (use the `name2key.csv.bz2`version). W-Hat still updates that database daily, so, with some clever `cron` magic, you might be able to get a fresh copy every day to import. Note that the database is supposed to be unique by name (and the UUIDs are not supposed to change): that means that you can import the 'new' version over an 'old' version, and only the relevant entries will be changed. Also, if you happen to have captured new entries (not yet existing on W-Hat's database) then these will _not_ be overwritten (or deleted) with a new import. To delete an old database, just delete the directory it is in.
 
 Importing the whole W-Hat database, which has a bit over 9 million entries, took on my Mac 1 minute and 38 seconds. Aye, that's quite a long time. On a shared server, it can be even longer. The code has been substantially changed to use `BatchSet` which is allegedly the recommended way of importing large databases, but even in the scenario to consume as little memory as possible, it will break most shared servers, simply because Go's garbage collector will not be fast enough to clean up after each batch is sent — I may have to take a look at how to do this better, perhaps with less concurrency.
 
