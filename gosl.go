@@ -6,17 +6,7 @@ import (
 	"compress/bzip2"
 	"encoding/csv"
 	"encoding/json"
-	flag "github.com/spf13/pflag"
 	"fmt"
-	"github.com/dgraph-io/badger"
-	"github.com/dgraph-io/badger/options"
-	"github.com/fsnotify/fsnotify"
-	"github.com/op/go-logging"
-	"github.com/spf13/viper"
-	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/syndtr/goleveldb/leveldb/util"
-	"github.com/tidwall/buntdb"
-	"gopkg.in/natefinch/lumberjack.v2"
 	"io"
 	"net/http"
 	"net/http/fcgi"
@@ -26,6 +16,17 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/options"
+	"github.com/fsnotify/fsnotify"
+	"github.com/op/go-logging"
+	flag "github.com/spf13/pflag"
+	"github.com/spf13/viper"
+	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/util"
+	"github.com/tidwall/buntdb"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 const NullUUID = "00000000-0000-0000-0000-000000000000" // always useful when we deal with SL/OpenSimulator...
@@ -42,15 +43,15 @@ var Opt badger.Options
 type avatarUUID struct {
 	UUID string		// needs to be capitalised for JSON marshalling (it has to do with the way it works)
 	Grid string
-} 
+}
 
 /*
-				  .__			 
-  _____ _____  |__| ____  
- /		  \\__	 \ |	 |/	\ 
+				  .__
+  _____ _____  |__| ____
+ /		  \\__	 \ |	 |/	\
 |  Y Y	\/ __ \|	 |		 |	 \
 |__|_|	(____  /__|___|	 /
-	  \/	 \/			  \/ 
+	  \/	 \/			  \/
 */
 
 // Configuration options
@@ -111,7 +112,7 @@ func main() {
 	goslConfig.importFilename	= flag.String("import", "name2key.csv.bz2", "Import database from W-Hat (use the csv.bz2 version)")
 	goslConfig.database 		= flag.String("database", "badger", "Database type (badger, buntdb, leveldb)")
 	goslConfig.noMemory 		= flag.Bool("nomemory", false, "Attempt to use only disk to save memory on Badger (important for shared webservers)")
-	
+
 	// Config viper, which reads in the configuration file every time it's needed.
 	// Note that we need some hard-coded variables for the path and config file name.
 	viper.SetConfigName("config")
@@ -119,7 +120,7 @@ func main() {
 	viper.AddConfigPath("$HOME/go/src/gosl-basics/") // that's how I have it
 	viper.AddConfigPath("$HOME/go/src/git.gwynethllewelyn.net/GwynethLlewelyn/gosl-basics/") // that's how you'll have it
 	viper.AddConfigPath(".")               // optionally look for config in the working directory
-	
+
 	loadConfiguration()
 	// default is FastCGI
 	flag.Parse()
@@ -133,12 +134,12 @@ func main() {
 		}
 		loadConfiguration()
 	})
-	
+
 	// NOTE(gwyneth): We cannot write to stdout if we're running as FastCGI, only to logs!
 	if *goslConfig.isServer || *goslConfig.isShell {
-		fmt.Println("gosl is starting...")	
+		fmt.Println("gosl is starting...")
 	}
-	
+
 	// Setup the lumberjack rotating logger. This is because we need it for the go-logging logger when writing to files. (20170813)
 	rotatingLogger := &lumberjack.Logger{
 		Filename:	goslConfig.logFilename,
@@ -146,16 +147,16 @@ func main() {
 		MaxBackups:	goslConfig.maxBackups,
 		MaxAge:		goslConfig.maxAge, //days
 	}
-	
+
 	// Set formatting for stderr and file (basically the same).
 	logFormat := logging.MustStringFormatter(`%{color}%{time:2006/01/02 15:04:05.0} %{shortfile} - %{shortfunc} ▶ %{level:.4s}%{color:reset} %{message}`) 	// must be initialised or all hell breaks loose
-	
+
 	// Setup the go-logging Logger. Do **not** log to stderr if running as FastCGI!
 	backendFile				:= logging.NewLogBackend(rotatingLogger, "", 0)
 	backendFileFormatter	:= logging.NewBackendFormatter(backendFile, logFormat)
 	backendFileLeveled 		:= logging.AddModuleLevel(backendFileFormatter)
 	backendFileLeveled.SetLevel(logging.INFO, "gosl")	// we just send debug data to logs if we run as shell
-	
+
 	if *goslConfig.isServer || *goslConfig.isShell {
 		backendStderr			:= logging.NewLogBackend(os.Stderr, "", 0)
 		backendStderrFormatter	:= logging.NewBackendFormatter(backendStderr, logFormat)
@@ -178,7 +179,7 @@ func main() {
 		// try to create directory
 		err = os.Mkdir(*goslConfig.myDir, 0700)
 		checkErrPanic(err) // cannot make directory, panic and exit logging what went wrong
-		log.Debugf("Created new directory: %s\n", *goslConfig.myDir)		
+		log.Debugf("Created new directory: %s\n", *goslConfig.myDir)
 	}
 	if *goslConfig.database == "badger" {
 		Opt = badger.DefaultOptions
@@ -186,7 +187,7 @@ func main() {
 		Opt.ValueDir = Opt.Dir
 		Opt.TableLoadingMode = options.MemoryMap
 		//Opt.TableLoadingMode = options.FileIO
-	
+
 		if *goslConfig.noMemory  {
 	//		Opt.TableLoadingMode = options.FileIO // use standard file I/O operations for tables instead of LoadRAM
 			Opt.TableLoadingMode = options.MemoryMap // MemoryMap indicates that that the file must be memory-mapped - https://github.com/dgraph-io/badger/issues/224#issuecomment-329643771
@@ -202,10 +203,10 @@ func main() {
 	//		Opt.maxBatchSize =
 	//		Opt.maxBatchCount =
 			goslConfig.BATCH_BLOCK = 1000	// try to import less at each time, it will take longer but hopefully work
-			log.Info("Trying to avoid too much memory consumption")	
+			log.Info("Trying to avoid too much memory consumption")
 		}
 	}
-	// Do some testing to see if the database is available				
+	// Do some testing to see if the database is available
 	const testAvatarName = "Nobody Here"
 	var err error
 
@@ -225,7 +226,7 @@ func main() {
 		log.Debugf("badger SET %+v (json: %v)\n", testValue, string(jsonTestValue))
 		kv.Close()
 	} else if *goslConfig.database == "buntdb" {
-		/* NOTE(gwyneth): this fails because pointers to strings do not implement len(). Duh! 
+		/* NOTE(gwyneth): this fails because pointers to strings do not implement len(). Duh!
 		if *goslConfig.myDir[len(*goslConfig.myDir)-1] != os.PathSeparator {
 			*goslConfig.myDir = append(*goslConfig.myDir + os.PathSeparator
 		} */
@@ -252,13 +253,13 @@ func main() {
 	key, grid := searchKVname(testAvatarName)
 	log.Debugf("GET '%s' returned '%s' [grid '%s']\n", testAvatarName, key, grid)
 	log.Info("KV database seems fine.")
-	
+
 	if *goslConfig.importFilename != "" {
 		log.Info("Attempting to import", *goslConfig.importFilename, "...")
 		importDatabase(*goslConfig.importFilename)
 		log.Info("Database finished import.")
 	}
-	
+
 	if *goslConfig.isShell {
 		log.Info("Starting to run as interactive shell")
 		reader := bufio.NewReader(os.Stdin)
@@ -266,7 +267,7 @@ func main() {
 		var err error	// to avoid assigning text in a different scope (this is a bit awkward, but that's the problem with bi-assignment)
 		var checkInput, avatarName, avatarKey, gridName string
 		for {
-			// Prompt and read			
+			// Prompt and read
 			fmt.Print("Enter avatar name or UUID: ")
 			checkInput, err = reader.ReadString('\n')
 			checkErr(err)
@@ -275,24 +276,24 @@ func main() {
 			if (len(checkInput) == 36) && isValidUUID(checkInput) {
 				avatarName, gridName = searchKVUUID(checkInput)
 				avatarKey = checkInput
-			} else {				
+			} else {
 				avatarKey, gridName = searchKVname(checkInput)
 				avatarName = checkInput
 			}
 			if avatarName != NullUUID && avatarKey != NullUUID {
-				fmt.Println(avatarName, "which has UUID:", avatarKey, "comes from grid:", gridName)	
+				fmt.Println(avatarName, "which has UUID:", avatarKey, "comes from grid:", gridName)
 			} else {
 				fmt.Println("Sorry, unknown input", checkInput)
-			}	
+			}
 		}
 		// never leaves until Ctrl-C
 	}
-	
+
 	// set up routing.
 	// NOTE(gwyneth): one function only because FastCGI seems to have problems with multiple handlers.
 	http.HandleFunc("/", handler)
 	log.Info("Directory for database:", *goslConfig.myDir)
-	
+
 	if (*goslConfig.isServer) {
 		log.Info("Starting to run as web server on port " + *goslConfig.myPort)
 		err := http.ListenAndServe(":" + *goslConfig.myPort, nil) // set listen port
@@ -309,7 +310,7 @@ func main() {
 	log.Error("Unknown usage! This application may run as a standalone server, as FastCGI application, or as an interactive shell")
 	if *goslConfig.isServer || *goslConfig.isShell {
 		flag.PrintDefaults()
-	}	
+	}
 }
 
 // handler deals with incoming queries and/or associates avatar names with keys depending on parameters.
@@ -354,7 +355,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			} else if *goslConfig.database == "buntdb" {
 				db, err := buntdb.Open(goslConfig.dbNamePath)
 				checkErrPanic(err)
-				defer db.Close()				
+				defer db.Close()
 				err = db.Update(func(tx *buntdb.Tx) error {
 					_, _, err := tx.Set(name, string(jsonValueToInsert), nil)
 					return err
@@ -365,7 +366,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 				checkErrPanic(err)
 				err = db.Put([]byte(name), jsonValueToInsert, nil)
 				checkErrPanic(err)
-				db.Close()				
+				db.Close()
 			}
 			messageToSL += "Added new entry for '" + name + "' which is: " + valueToInsert.UUID + " from grid: '" + valueToInsert.Grid + "'"
 		} else {
@@ -374,7 +375,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			if compat == "false" {
 				messageToSL += "UUID for '" + name + "' is: " + key + " from grid: '" + grid + "'"
 			} else { // empty also means true!
-				messageToSL += key		
+				messageToSL += key
 			}
 		}
 	} else if key != "" {
@@ -383,13 +384,13 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		if compat == "false" {
 			messageToSL += "Avatar name for " + key + "' is '" + name + "' on grid: '" + grid + "'"
 		} else { // empty also means true!
-			messageToSL += name		
+			messageToSL += name
 		}
 	} else {
 		// neither UUID key nor avatar received, this is an error
 		logErrHTTP(w, http.StatusNotFound, "Empty avatar name and UUID key received, cannot proceed")
-		return	
-	}	
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	fmt.Fprintf(w, messageToSL)
@@ -407,36 +408,36 @@ func searchKVname(avatarName string) (UUID string, grid string) {
 		    item, err := txn.Get([]byte(avatarName))
 			if err != nil {
 				return err
-	    	}    	
+	    	}
 	    	data, err := item.Value()
 			if err != nil {
 				log.Errorf("Error '%s' while getting data from %v\n", err, item)
 				return err
-	    	}    	
+	    	}
 	    	err = json.Unmarshal(data, &val)
 			if err != nil {
 				log.Errorf("Error while unparsing UUID for name: '%s' (%v)\n", avatarName, err)
 				return err
 	    	}
 	    	return nil
-		})	
+		})
 	} else if *goslConfig.database == "buntdb" {
 		db, err := buntdb.Open(goslConfig.dbNamePath)
 		checkErrPanic(err)
 		defer db.Close()
 		var data string
 		err = db.View(func(tx *buntdb.Tx) error {
-		    data, err = tx.Get(avatarName) 
-		    return err 
+		    data, err = tx.Get(avatarName)
+		    return err
 		})
     	err = json.Unmarshal([]byte(data), &val)
 		if err != nil {
 			log.Errorf("Error while unparsing UUID for name: '%s' (%v)\n", avatarName, err)
-    	}			
+    	}
 	} else if *goslConfig.database == "leveldb" {
 		db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
 		checkErrPanic(err)
-		defer db.Close()		
+		defer db.Close()
 		data, err := db.Get([]byte(avatarName), nil)
 		if err != nil {
 			log.Errorf("Error while getting UUID for name: '%s' (%v)\n", avatarName, err)
@@ -445,7 +446,7 @@ func searchKVname(avatarName string) (UUID string, grid string) {
 			if err != nil {
 				log.Errorf("Error while unparsing UUID for name: '%s' (%v)\n", avatarName, err)
     		}
-    	}			
+    	}
 	}
 	log.Debugf("Time to lookup '%s': %v\n", avatarName, time.Since(time_start))
 	if err != nil {
@@ -459,7 +460,7 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 	checks := 0
 	var val = avatarUUID{ NullUUID, "" }
 	var found string
-	
+
 	if *goslConfig.database == "badger" {
 		kv, err := badger.Open(Opt)
 		checkErr(err) // should probably panic
@@ -474,17 +475,17 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 // 		}
 		txn := kv.NewTransaction(true)
 		defer txn.Discard()
-	
-		err = kv.View(func(txn *badger.Txn) error {				
+
+		err = kv.View(func(txn *badger.Txn) error {
 			itr := txn.NewIterator(itOpt)
-			defer itr.Close()		
+			defer itr.Close()
 			for itr.Rewind(); itr.Valid(); itr.Next() {
 				item := itr.Item()
 				data, err := item.Value()
 				if err != nil {
 					log.Errorf("Error '%s' while getting data from %v\n", err, item)
 					return err
-		    	}    	
+		    	}
 		    	err = json.Unmarshal(data, &val)
 				if err != nil {
 					log.Errorf("Error '%s' while unparsing UUID for data: %v\n", err, data)
@@ -511,13 +512,13 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 				checks++	//Just to see how many checks we made, for statistical purposes
 				if avatarKey == val.UUID {
 					found = key
-					return false			
+					return false
 				}
 				return true
 		    })
 		    return err
 		})
-		db.Close()	
+		db.Close()
 	} else if *goslConfig.database == "leveldb" {
 		db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
 		checkErrPanic(err)
@@ -530,7 +531,7 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 	    	err = json.Unmarshal(value, &val)
 			if err != nil {
 				log.Errorf("Error '%s' while unparsing UUID for data: %v\n", err, value)
-				continue // a bit insane, but at least we will skip a few broken records 
+				continue // a bit insane, but at least we will skip a few broken records
 	    	}
 			checks++	//Just to see how many checks we made, for statistical purposes
 			if avatarKey == val.UUID {
@@ -560,13 +561,13 @@ func importDatabase(filename string) {
 
 	limit := 0	// outside of for loop so that we can count how many entries we had in total
 	time_start := time.Now() // we want to get an idea on how long this takes
-	
+
 	if *goslConfig.database == "badger" {
 		// prepare connection to KV database
 		kv, err := badger.Open(Opt)
-		checkErrPanic(err) // should probably panic		
-		defer kv.Close()	
-	
+		checkErrPanic(err) // should probably panic
+		defer kv.Close()
+
 		txn := kv.NewTransaction(true) // start new transaction; we will commit only every BATCH_BLOCK entries
 		defer txn.Discard()
 		for ;;limit++ {
@@ -579,7 +580,7 @@ func importDatabase(filename string) {
 			jsonNewEntry, err := json.Marshal(avatarUUID{ record[0], "Production" }) // W-Hat keys come all from the main LL grid, known as 'Production'
 			if err != nil {
 				log.Warning(err)
-			} else {			 
+			} else {
 				err = txn.Set([]byte(record[1]), jsonNewEntry)
 				if err != nil {
 				    log.Fatal(err)
@@ -606,11 +607,11 @@ func importDatabase(filename string) {
 		db, err := buntdb.Open(goslConfig.dbNamePath)
 		checkErrPanic(err)
 		defer db.Close()
-		
+
 		txn, err := db.Begin(true)
 		checkErrPanic(err)
 		//defer txn.Commit()
-		
+
 		// very similar to Badger code...
 		for ;;limit++ {
 			record, err := cr.Read()
@@ -622,7 +623,7 @@ func importDatabase(filename string) {
 			jsonNewEntry, err := json.Marshal(avatarUUID{ record[0], "Production" })
 			if err != nil {
 				log.Warning(err)
-			} else {			 
+			} else {
 				_, _, err = txn.Set(record[1], string(jsonNewEntry), nil)
 				if err != nil {
 				    log.Fatal(err)
@@ -644,7 +645,7 @@ func importDatabase(filename string) {
 		err = txn.Commit()
 		if err != nil {
 		    log.Fatal(err)
-		}			
+		}
 		db.Shrink()
 	} else if *goslConfig.database == "leveldb" {
 		db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
@@ -666,7 +667,7 @@ func importDatabase(filename string) {
 				batch.Put([]byte(record[1]), jsonNewEntry)
 			}
 			if limit % goslConfig.BATCH_BLOCK == 0 && limit != 0 {
-				log.Info("Processing:", limit)		
+				log.Info("Processing:", limit)
 				err = db.Write(batch, nil)
 				if err != nil {
 				    log.Fatal(err)
@@ -682,7 +683,7 @@ func importDatabase(filename string) {
 		}
 		batch.Reset()	// reset it and let the garbage collector run
 		runtime.GC()
-		db.CompactRange(util.Range{ nil, nil })	
+		db.CompactRange(util.Range{ nil, nil })
 	}
 	log.Info("Total read", limit, "records (or thereabouts) in", time.Since(time_start))
 }
@@ -712,7 +713,7 @@ func checkErrHTTP(w http.ResponseWriter, httpStatus int, errorMessage string, er
 	if err != nil {
 		http.Error(w, fmt.Sprintf(errorMessage, err), httpStatus)
 		pc, file, line, ok := runtime.Caller(1)
-		log.Error("(", http.StatusText(httpStatus), ") ", filepath.Base(file), ":", line, ":", pc, ok, " - error:", errorMessage, err)	
+		log.Error("(", http.StatusText(httpStatus), ") ", filepath.Base(file), ":", line, ":", pc, ok, " - error:", errorMessage, err)
 	}
 }
 // checkErrPanicHTTP returns an error via HTTP and logs the error with a panic.
@@ -724,7 +725,7 @@ func checkErrPanicHTTP(w http.ResponseWriter, httpStatus int, errorMessage strin
 	}
 }
 // logErrHTTP assumes that the error message was already composed and writes it to HTTP and logs it.
-//	this is mostly to avoid code duplication and make sure that all entries are written similarly 
+//	this is mostly to avoid code duplication and make sure that all entries are written similarly
 func logErrHTTP(w http.ResponseWriter, httpStatus int, errorMessage string) {
 	http.Error(w, errorMessage, httpStatus)
 	log.Error("(" + http.StatusText(httpStatus) + ") " + errorMessage)
