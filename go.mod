@@ -4,7 +4,7 @@ go 1.15
 
 require (
 	github.com/dgraph-io/badger v1.6.2
-	github.com/dgraph-io/ristretto v0.0.3 // indirect
+	github.com/dgraph-io/badger/v3 v3.2011.1
 	github.com/fsnotify/fsnotify v1.4.9
 	github.com/golang/protobuf v1.4.3 // indirect
 	github.com/golang/snappy v0.0.2 // indirect
@@ -12,7 +12,6 @@ require (
 	github.com/mitchellh/mapstructure v1.4.1 // indirect
 	github.com/op/go-logging v0.0.0-20160315200505-970db520ece7
 	github.com/pelletier/go-toml v1.8.1 // indirect
-	github.com/pkg/errors v0.9.1 // indirect
 	github.com/spf13/afero v1.5.1 // indirect
 	github.com/spf13/cast v1.3.1 // indirect
 	github.com/spf13/jwalterweatherman v1.1.0 // indirect

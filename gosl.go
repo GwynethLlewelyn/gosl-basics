@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dgraph-io/badger"
-	"github.com/dgraph-io/badger/options"
+	"github.com/dgraph-io/badger/v3"
+//	"github.com/dgraph-io/badger/options"
 	"github.com/fsnotify/fsnotify"
 	"github.com/op/go-logging"
 	flag "github.com/spf13/pflag"
