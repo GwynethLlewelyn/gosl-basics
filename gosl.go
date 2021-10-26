@@ -19,7 +19,7 @@ import (
 
 	"github.com/dgraph-io/badger/v3"
 //	"github.com/dgraph-io/badger/options"
-	"github.com/fsnotify/fsnotify"
+//	"github.com/fsnotify/fsnotify"
 	"github.com/op/go-logging"
 	flag "github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -72,7 +72,7 @@ func loadConfiguration() {
 	// Open our config file and extract relevant data from there
 	err := viper.ReadInConfig() // Find and read the config file
 	if err != nil {
-		fmt.Println("Error reading config file:", err)
+		fmt.Println("error reading config file:", err)
 		return	// we might still get away with this!
 	}
 	viper.SetDefault("config.BATCH_BLOCK", 100000)	// NOTE(gwyneth): the authors of say that 100000 is way too much for Badger													// NOTE(gwyneth): let's see what happens with BuntDB
@@ -127,13 +127,14 @@ func main() {
 	viper.BindPFlags(flag.CommandLine)
 
 	// this will allow our configuration file to be 'read on demand'
-	viper.WatchConfig()
-	viper.OnConfigChange(func(e fsnotify.Event) {
-		if *goslConfig.isServer || *goslConfig.isShell {
-			fmt.Println("Config file changed:", e.Name)	// BUG(gwyneth): FastCGI cannot write to output
-		}
-		loadConfiguration()
-	})
+	// TODO(gwyneth): There is something broken with this, no reason why... (gwyneth 20211026)
+	// viper.WatchConfig()
+	// viper.OnConfigChange(func(e fsnotify.Event) {
+	// 	if *goslConfig.isServer || *goslConfig.isShell {
+	// 		fmt.Println("Config file changed:", e.Name)	// BUG(gwyneth): FastCGI cannot write to output
+	// 	}
+	// 	loadConfiguration()
+	// })
 
 	// NOTE(gwyneth): We cannot write to stdout if we're running as FastCGI, only to logs!
 	if *goslConfig.isServer || *goslConfig.isShell {
@@ -174,12 +175,12 @@ func main() {
 	// Check if this directory actually exists; if not, create it. Panic if something wrong happens (we cannot proceed without a valid directory for the database to be written
 	if stat, err := os.Stat(*goslConfig.myDir); err == nil && stat.IsDir() {
 		// path is a valid directory
-		log.Infof("Valid directory: %s\n", *goslConfig.myDir)
+		log.Infof("valid directory: %s\n", *goslConfig.myDir)
 	} else {
 		// try to create directory
 		err = os.Mkdir(*goslConfig.myDir, 0700)
 		checkErrPanic(err) // cannot make directory, panic and exit logging what went wrong
-		log.Debugf("Created new directory: %s\n", *goslConfig.myDir)
+		log.Debugf("created new directory: %s\n", *goslConfig.myDir)
 	}
 	if *goslConfig.database == "badger" {
 		// Badger v3 - fully rewritten configuration (much simpler!!) (gwyneth 20211026)
@@ -196,7 +197,7 @@ func main() {
 		// common configuration
 
 		goslConfig.BATCH_BLOCK = 1000	// try to import less at each time, it will take longer but hopefully work
-		log.Info("Trying to avoid too much memory consumption")
+		log.Info("trying to avoid too much memory consumption")
 	}
 	// Do some testing to see if the database is available
 	const testAvatarName = "Nobody Here"
@@ -244,24 +245,24 @@ func main() {
 	} // /switch
 	// common to all databases:
 	key, grid := searchKVname(testAvatarName)
-	log.Debugf("GET '%s' returned '%s' [grid '%s']\n", testAvatarName, key, grid)
+	log.Debugf("GET %q returned %q [grid %q]\n", testAvatarName, key, grid)
 	log.Info("KV database seems fine.")
 
 	if *goslConfig.importFilename != "" {
-		log.Info("Attempting to import", *goslConfig.importFilename, "...")
+		log.Info("attempting to import", *goslConfig.importFilename, "...")
 		importDatabase(*goslConfig.importFilename)
-		log.Info("Database finished import.")
+		log.Info("database finished import.")
 	}
 
 	if *goslConfig.isShell {
-		log.Info("Starting to run as interactive shell")
+		log.Info("starting to run as interactive shell")
 		reader := bufio.NewReader(os.Stdin)
 		fmt.Println("Ctrl-C to quit.")
 		var err error	// to avoid assigning text in a different scope (this is a bit awkward, but that's the problem with bi-assignment)
 		var checkInput, avatarName, avatarKey, gridName string
 		for {
 			// Prompt and read
-			fmt.Print("Enter avatar name or UUID: ")
+			fmt.Print("enter avatar name or UUID: ")
 			checkInput, err = reader.ReadString('\n')
 			checkErr(err)
 			checkInput = strings.TrimRight(checkInput, "\r\n")
@@ -276,7 +277,7 @@ func main() {
 			if avatarName != NullUUID && avatarKey != NullUUID {
 				fmt.Println(avatarName, "which has UUID:", avatarKey, "comes from grid:", gridName)
 			} else {
-				fmt.Println("Sorry, unknown input", checkInput)
+				fmt.Println("sorry, unknown input", checkInput)
 			}
 		}
 		// never leaves until Ctrl-C
@@ -285,10 +286,10 @@ func main() {
 	// set up routing.
 	// NOTE(gwyneth): one function only because FastCGI seems to have problems with multiple handlers.
 	http.HandleFunc("/", handler)
-	log.Info("Directory for database:", *goslConfig.myDir)
+	log.Info("directory for database:", *goslConfig.myDir)
 
 	if (*goslConfig.isServer) {
-		log.Info("Starting to run as web server on port " + *goslConfig.myPort)
+		log.Info("starting to run as web server on port " + *goslConfig.myPort)
 		err := http.ListenAndServe(":" + *goslConfig.myPort, nil) // set listen port
 		checkErrPanic(err) // if it can't listen to all the above, then it has to abort anyway
 	} else {
@@ -313,7 +314,7 @@ func main() {
 //	if nothing is received, then return an error
 func handler(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
-		logErrHTTP(w, http.StatusNotFound, "No avatar and/or UUID received")
+		logErrHTTP(w, http.StatusNotFound, "no avatar and/or UUID received")
 		return
 	}
 	// test first if this comes from Second Life or OpenSimulator
@@ -376,13 +377,13 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		// in this scenario, we have the UUID key but no avatar name: do the equivalent of a llKey2Name (slow)
 		name, grid := searchKVUUID(key)
 		if compat == "false" {
-			messageToSL += "Avatar name for " + key + "' is '" + name + "' on grid: '" + grid + "'"
+			messageToSL += "avatar name for " + key + "' is '" + name + "' on grid: '" + grid + "'"
 		} else { // empty also means true!
 			messageToSL += name
 		}
 	} else {
 		// neither UUID key nor avatar received, this is an error
-		logErrHTTP(w, http.StatusNotFound, "Empty avatar name and UUID key received, cannot proceed")
+		logErrHTTP(w, http.StatusNotFound, "empty avatar name and UUID key received, cannot proceed")
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -406,12 +407,12 @@ func searchKVname(avatarName string) (UUID string, grid string) {
 		    	}
 				data, err := item.ValueCopy(nil)
 				if err != nil {
-					log.Errorf("error '%s' while getting data from %v\n", err, item)
+					log.Errorf("error %q while getting data from %v\n", err, item)
 					return err
 		    	}
 		    	err = json.Unmarshal(data, &val)
 				if err != nil {
-					log.Errorf("error while unparsing UUID for name: '%s' (%v)\n", avatarName, err)
+					log.Errorf("error while unparsing UUID for name: %q (%v)\n", avatarName, err)
 					return err
 		    	}
 		    	return nil
@@ -428,7 +429,7 @@ func searchKVname(avatarName string) (UUID string, grid string) {
 			})
 	    	err = json.Unmarshal([]byte(data), &val)
 			if err != nil {
-				log.Errorf("error while unparsing UUID for name: '%s' (%v)\n", avatarName, err)
+				log.Errorf("error while unparsing UUID for name: %q (%v)\n", avatarName, err)
 	    	}
 		case "leveldb":
 			db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
@@ -436,15 +437,15 @@ func searchKVname(avatarName string) (UUID string, grid string) {
 			defer db.Close()
 			data, err := db.Get([]byte(avatarName), nil)
 			if err != nil {
-				log.Errorf("error while getting UUID for name: '%s' (%v)\n", avatarName, err)
+				log.Errorf("error while getting UUID for name: %q (%v)\n", avatarName, err)
 	    	} else {
 		    	err = json.Unmarshal(data, &val)
 				if err != nil {
-					log.Errorf("error while unparsing UUID for name: '%s' (%v)\n", avatarName, err)
+					log.Errorf("error while unparsing UUID for name: %q (%v)\n", avatarName, err)
 	    		}
 	    	}
 	}
-	log.Debugf("time to lookup '%s': %v\n", avatarName, time.Since(time_start))
+	log.Debugf("time to lookup %q: %v\n", avatarName, time.Since(time_start))
 	if err != nil {
 		return NullUUID, ""
 	} // else:
@@ -479,12 +480,12 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 				item := itr.Item()
 				data, err := item.ValueCopy(nil)
 				if err != nil {
-					log.Errorf("Error '%s' while getting data from %v\n", err, item)
+					log.Errorf("error %q while getting data from %v\n", err, item)
 					return err
 		    	}
 		    	err = json.Unmarshal(data, &val)
 				if err != nil {
-					log.Errorf("Error '%s' while unparsing UUID for data: %v\n", err, data)
+					log.Errorf("error %q while unparsing UUID for data: %v\n", err, data)
 					return err
 		    	}
 				checks++	//Just to see how many checks we made, for statistical purposes
@@ -504,7 +505,7 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 			err := tx.Ascend("", func(key, value string) bool {
 		    	err = json.Unmarshal([]byte(value), &val)
 				if err != nil {
-					log.Errorf("error '%s' while unparsing UUID for value: %v\n", err, value)
+					log.Errorf("error %q while unparsing UUID for value: %v\n", err, value)
 		    	}
 				checks++	//Just to see how many checks we made, for statistical purposes
 				if avatarKey == val.UUID {
@@ -527,7 +528,7 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 			value := iter.Value()
 	    	err = json.Unmarshal(value, &val)
 			if err != nil {
-				log.Errorf("Error '%s' while unparsing UUID for data: %v\n", err, value)
+				log.Errorf("error %q while unparsing UUID for data: %v\n", err, value)
 				continue // a bit insane, but at least we will skip a few broken records
 	    	}
 			checks++	//Just to see how many checks we made, for statistical purposes
@@ -541,7 +542,7 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 		checkErr(err)
 		db.Close()
 	}
-	log.Debugf("made %d checks for '%s' in %v\n", checks, avatarKey, time.Since(time_start))
+	log.Debugf("made %d checks for %q in %v\n", checks, avatarKey, time.Since(time_start))
 	return found, val.Grid
 }
 
