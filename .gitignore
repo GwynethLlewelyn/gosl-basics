@@ -54,4 +54,9 @@ gosl.log
 *.vlog
 *.sst
 MANIFEST
+
+# Where willthe database files be saved?
 slkvdb/
+
+# Local stuff that won't be exported
+config.toml

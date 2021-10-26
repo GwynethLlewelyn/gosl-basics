@@ -75,7 +75,7 @@ func loadConfiguration() {
 		fmt.Println("Error reading config file:", err)
 		return	// we might still get away with this!
 	}
-	viper.SetDefault("config.BATCH_BLOCK", 100000)	// NOTE(gwyneth): the authors of say that 100000 is way too much for Badger																// NOTE(gwyneth): let's see what happens with BuntDB
+	viper.SetDefault("config.BATCH_BLOCK", 100000)	// NOTE(gwyneth): the authors of say that 100000 is way too much for Badger													// NOTE(gwyneth): let's see what happens with BuntDB
 	goslConfig.BATCH_BLOCK = viper.GetInt("config.BATCH_BLOCK")
 	viper.SetDefault("config.myPort", 3000)
 	*goslConfig.myPort = viper.GetString("config.myPort")
@@ -104,7 +104,8 @@ func loadConfiguration() {
 
 // main() starts here.
 func main() {
-	// Flag setup; can be overridden by config file (I need to fix this to be the oher way round).
+	// Flag setup; can be overridden by config file.
+	// TODO(gwyneth): I need to fix this to be the oher way round).
 	goslConfig.myPort			= flag.String("port", "3000", "Server port")
 	goslConfig.myDir			= flag.String("dir", "slkvdb", "Directory where database files are stored")
 	goslConfig.isServer			= flag.Bool("server", false, "Run as server on port " + *goslConfig.myPort)
@@ -117,9 +118,8 @@ func main() {
 	// Note that we need some hard-coded variables for the path and config file name.
 	viper.SetConfigName("config")
 	viper.SetConfigType("toml") // just to make sure; it's the same format as OpenSimulator (or MySQL) config files
-	viper.AddConfigPath("$HOME/go/src/gosl-basics/") // that's how I have it
-	viper.AddConfigPath("$HOME/go/src/git.gwynethllewelyn.net/GwynethLlewelyn/gosl-basics/") // that's how you'll have it
 	viper.AddConfigPath(".")               // optionally look for config in the working directory
+	viper.AddConfigPath("$HOME/go/src/git.gwynethllewelyn.net/GwynethLlewelyn/gosl-basics/") // that's how you'll have it
 
 	loadConfiguration()
 	// default is FastCGI
@@ -182,29 +182,21 @@ func main() {
 		log.Debugf("Created new directory: %s\n", *goslConfig.myDir)
 	}
 	if *goslConfig.database == "badger" {
-		Opt = badger.DefaultOptions
-		Opt.Dir = *goslConfig.myDir
-		Opt.ValueDir = Opt.Dir
-		Opt.TableLoadingMode = options.MemoryMap
-		//Opt.TableLoadingMode = options.FileIO
-
+		// Badger v3 - fully rewritten configuration (much simpler!!) (gwyneth 20211026)
 		if *goslConfig.noMemory  {
-	//		Opt.TableLoadingMode = options.FileIO // use standard file I/O operations for tables instead of LoadRAM
-			Opt.TableLoadingMode = options.MemoryMap // MemoryMap indicates that that the file must be memory-mapped - https://github.com/dgraph-io/badger/issues/224#issuecomment-329643771
-	//		Opt.TableLoadingMode = options.FileIO
-	//		Opt.ValueLogFileSize = 1048576
-			Opt.MaxTableSize = 1048576 // * 12
+			// use disk
+			Opt = badger.DefaultOptions(*goslConfig.myDir)
+		} else {
+			// Use only memory
+			Opt = badger.DefaultOptions("").WithInMemory(true)
+			Opt.ValueDir = Opt.Dir	// probably not needed
 			Opt.LevelSizeMultiplier = 1
 			Opt.NumMemtables = 1
-	//		Opt.MaxLevels = 10
-	//		Opt.SyncWrites = false
-	//		Opt.NumCompactors = 10
-	//		Opt.NumLevelZeroTables = 10
-	//		Opt.maxBatchSize =
-	//		Opt.maxBatchCount =
-			goslConfig.BATCH_BLOCK = 1000	// try to import less at each time, it will take longer but hopefully work
-			log.Info("Trying to avoid too much memory consumption")
 		}
+		// common configuration
+
+		goslConfig.BATCH_BLOCK = 1000	// try to import less at each time, it will take longer but hopefully work
+		log.Info("Trying to avoid too much memory consumption")
 	}
 	// Do some testing to see if the database is available
 	const testAvatarName = "Nobody Here"
@@ -215,40 +207,41 @@ func main() {
 	jsonTestValue, err := json.Marshal(testValue)
 	checkErrPanic(err) // something went VERY wrong
 
-	if *goslConfig.database == "badger" {
-		kv, err := badger.Open(Opt)
-		checkErrPanic(err) // should probably panic, cannot prep new database
-		txn := kv.NewTransaction(true)
-		err = txn.Set([]byte(testAvatarName), jsonTestValue)
-		checkErrPanic(err)
-		err = txn.Commit(nil)
-		checkErrPanic(err)
-		log.Debugf("badger SET %+v (json: %v)\n", testValue, string(jsonTestValue))
-		kv.Close()
-	} else if *goslConfig.database == "buntdb" {
-		/* NOTE(gwyneth): this fails because pointers to strings do not implement len(). Duh!
-		if *goslConfig.myDir[len(*goslConfig.myDir)-1] != os.PathSeparator {
-			*goslConfig.myDir = append(*goslConfig.myDir + os.PathSeparator
-		} */
-		goslConfig.dbNamePath = *goslConfig.myDir + string(os.PathSeparator) + databaseName
-		db, err := buntdb.Open(goslConfig.dbNamePath)
-		checkErrPanic(err)
-		err = db.Update(func(tx *buntdb.Tx) error {
-			_, _, err := tx.Set(testAvatarName, string(jsonTestValue), nil)
-			return err
-		})
-		checkErr(err)
-		log.Debugf("buntdb SET %+v (json: %v)\n", testValue, string(jsonTestValue))
-		db.Close()
-	} else if *goslConfig.database == "leveldb" {
-		goslConfig.dbNamePath = *goslConfig.myDir + string(os.PathSeparator) + databaseName
-		db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
-		checkErrPanic(err)
-		err = db.Put([]byte(testAvatarName), jsonTestValue, nil)
-		checkErrPanic(err)
-		log.Debugf("leveldb SET %+v (json: %v)\n", testValue, string(jsonTestValue))
-		db.Close()
-	}
+	switch *goslConfig.database {
+		case "badger":
+			kv, err := badger.Open(Opt)
+			checkErrPanic(err) // should probably panic, cannot prep new database
+			txn := kv.NewTransaction(true)
+			err = txn.Set([]byte(testAvatarName), jsonTestValue)
+			checkErrPanic(err)
+			err = txn.Commit()
+			checkErrPanic(err)
+			log.Debugf("badger SET %+v (json: %v)\n", testValue, string(jsonTestValue))
+			kv.Close()
+		case "buntdb":
+			/* NOTE(gwyneth): this fails because pointers to strings do not implement len(). Duh!
+			if *goslConfig.myDir[len(*goslConfig.myDir)-1] != os.PathSeparator {
+				*goslConfig.myDir = append(*goslConfig.myDir + os.PathSeparator
+			} */
+			goslConfig.dbNamePath = *goslConfig.myDir + string(os.PathSeparator) + databaseName
+			db, err := buntdb.Open(goslConfig.dbNamePath)
+			checkErrPanic(err)
+			err = db.Update(func(tx *buntdb.Tx) error {
+				_, _, err := tx.Set(testAvatarName, string(jsonTestValue), nil)
+				return err
+			})
+			checkErr(err)
+			log.Debugf("buntdb SET %+v (json: %v)\n", testValue, string(jsonTestValue))
+			db.Close()
+		case "leveldb":
+			goslConfig.dbNamePath = *goslConfig.myDir + string(os.PathSeparator) + databaseName
+			db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
+			checkErrPanic(err)
+			err = db.Put([]byte(testAvatarName), jsonTestValue, nil)
+			checkErrPanic(err)
+			log.Debugf("leveldb SET %+v (json: %v)\n", testValue, string(jsonTestValue))
+			db.Close()
+	} // /switch
 	// common to all databases:
 	key, grid := searchKVname(testAvatarName)
 	log.Debugf("GET '%s' returned '%s' [grid '%s']\n", testAvatarName, key, grid)
@@ -307,7 +300,7 @@ func main() {
 		}
 	}
 	// we should never have reached this point!
-	log.Error("Unknown usage! This application may run as a standalone server, as FastCGI application, or as an interactive shell")
+	log.Error("unknown usage — this application may run as a standalone server, as a FastCGI application, or as an interactive shell")
 	if *goslConfig.isServer || *goslConfig.isShell {
 		flag.PrintDefaults()
 	}
@@ -342,31 +335,32 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			valueToInsert.Grid = r.Header.Get("X-Secondlife-Shard")
 			jsonValueToInsert, err := json.Marshal(valueToInsert)
 			checkErr(err)
-			if *goslConfig.database == "badger" {
-				kv, err := badger.Open(Opt)
-				checkErrPanic(err) // should probably panic
-				txn := kv.NewTransaction(true)
-				defer txn.Discard()
-				err = txn.Set([]byte(name), jsonValueToInsert)
-				checkErrPanic(err)
-				err = txn.Commit(nil)
-				checkErrPanic(err)
-				kv.Close()
-			} else if *goslConfig.database == "buntdb" {
-				db, err := buntdb.Open(goslConfig.dbNamePath)
-				checkErrPanic(err)
-				defer db.Close()
-				err = db.Update(func(tx *buntdb.Tx) error {
-					_, _, err := tx.Set(name, string(jsonValueToInsert), nil)
-					return err
-				})
-				checkErr(err)
-			} else if *goslConfig.database == "leveldb" {
-				db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
-				checkErrPanic(err)
-				err = db.Put([]byte(name), jsonValueToInsert, nil)
-				checkErrPanic(err)
-				db.Close()
+			switch *goslConfig.database {
+				case "badger":
+					kv, err := badger.Open(Opt)
+					checkErrPanic(err) // should probably panic
+					txn := kv.NewTransaction(true)
+					defer txn.Discard()
+					err = txn.Set([]byte(name), jsonValueToInsert)
+					checkErrPanic(err)
+					err = txn.Commit()
+					checkErrPanic(err)
+					kv.Close()
+				case "buntdb":
+					db, err := buntdb.Open(goslConfig.dbNamePath)
+					checkErrPanic(err)
+					defer db.Close()
+					err = db.Update(func(tx *buntdb.Tx) error {
+						_, _, err := tx.Set(name, string(jsonValueToInsert), nil)
+						return err
+					})
+					checkErr(err)
+				case "leveldb":
+					db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
+					checkErrPanic(err)
+					err = db.Put([]byte(name), jsonValueToInsert, nil)
+					checkErrPanic(err)
+					db.Close()
 			}
 			messageToSL += "Added new entry for '" + name + "' which is: " + valueToInsert.UUID + " from grid: '" + valueToInsert.Grid + "'"
 		} else {
@@ -393,62 +387,64 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	fmt.Fprintf(w, messageToSL)
+	fmt.Fprint(w, messageToSL)
 }
 // searchKVname searches the KV database for an avatar name.
 func searchKVname(avatarName string) (UUID string, grid string) {
 	var val = avatarUUID{ NullUUID, "" }
 	time_start := time.Now()
 	var err error // to deal with scope issues
-	if *goslConfig.database == "badger" {
-		kv, err := badger.Open(Opt)
-		checkErrPanic(err)
-		defer kv.Close()
-		err = kv.View(func(txn *badger.Txn) error {
-		    item, err := txn.Get([]byte(avatarName))
+	switch *goslConfig.database {
+		case "badger":
+			kv, err := badger.Open(Opt)
+			checkErrPanic(err)
+			defer kv.Close()
+			err = kv.View(func(txn *badger.Txn) error {
+			    item, err := txn.Get([]byte(avatarName))
+				if err != nil {
+					return err
+		    	}
+				data, err := item.ValueCopy(nil)
+				if err != nil {
+					log.Errorf("error '%s' while getting data from %v\n", err, item)
+					return err
+		    	}
+		    	err = json.Unmarshal(data, &val)
+				if err != nil {
+					log.Errorf("error while unparsing UUID for name: '%s' (%v)\n", avatarName, err)
+					return err
+		    	}
+		    	return nil
+			})
+			checkErr(err)
+		case "buntdb":
+			db, err := buntdb.Open(goslConfig.dbNamePath)
+			checkErrPanic(err)
+			defer db.Close()
+			var data string
+			err = db.View(func(tx *buntdb.Tx) error {
+			    data, err = tx.Get(avatarName)
+			    return err
+			})
+	    	err = json.Unmarshal([]byte(data), &val)
 			if err != nil {
-				return err
+				log.Errorf("error while unparsing UUID for name: '%s' (%v)\n", avatarName, err)
 	    	}
-	    	data, err := item.Value()
+		case "leveldb":
+			db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
+			checkErrPanic(err)
+			defer db.Close()
+			data, err := db.Get([]byte(avatarName), nil)
 			if err != nil {
-				log.Errorf("Error '%s' while getting data from %v\n", err, item)
-				return err
+				log.Errorf("error while getting UUID for name: '%s' (%v)\n", avatarName, err)
+	    	} else {
+		    	err = json.Unmarshal(data, &val)
+				if err != nil {
+					log.Errorf("error while unparsing UUID for name: '%s' (%v)\n", avatarName, err)
+	    		}
 	    	}
-	    	err = json.Unmarshal(data, &val)
-			if err != nil {
-				log.Errorf("Error while unparsing UUID for name: '%s' (%v)\n", avatarName, err)
-				return err
-	    	}
-	    	return nil
-		})
-	} else if *goslConfig.database == "buntdb" {
-		db, err := buntdb.Open(goslConfig.dbNamePath)
-		checkErrPanic(err)
-		defer db.Close()
-		var data string
-		err = db.View(func(tx *buntdb.Tx) error {
-		    data, err = tx.Get(avatarName)
-		    return err
-		})
-    	err = json.Unmarshal([]byte(data), &val)
-		if err != nil {
-			log.Errorf("Error while unparsing UUID for name: '%s' (%v)\n", avatarName, err)
-    	}
-	} else if *goslConfig.database == "leveldb" {
-		db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
-		checkErrPanic(err)
-		defer db.Close()
-		data, err := db.Get([]byte(avatarName), nil)
-		if err != nil {
-			log.Errorf("Error while getting UUID for name: '%s' (%v)\n", avatarName, err)
-    	} else {
-	    	err = json.Unmarshal(data, &val)
-			if err != nil {
-				log.Errorf("Error while unparsing UUID for name: '%s' (%v)\n", avatarName, err)
-    		}
-    	}
 	}
-	log.Debugf("Time to lookup '%s': %v\n", avatarName, time.Since(time_start))
+	log.Debugf("time to lookup '%s': %v\n", avatarName, time.Since(time_start))
 	if err != nil {
 		return NullUUID, ""
 	} // else:
@@ -481,7 +477,7 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 			defer itr.Close()
 			for itr.Rewind(); itr.Valid(); itr.Next() {
 				item := itr.Item()
-				data, err := item.Value()
+				data, err := item.ValueCopy(nil)
 				if err != nil {
 					log.Errorf("Error '%s' while getting data from %v\n", err, item)
 					return err
@@ -499,6 +495,7 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 			}
 			return nil
 		})
+		checkErr(err)
 		kv.Close()
 	} else if *goslConfig.database == "buntdb" {
 		db, err := buntdb.Open(goslConfig.dbNamePath)
@@ -507,7 +504,7 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 			err := tx.Ascend("", func(key, value string) bool {
 		    	err = json.Unmarshal([]byte(value), &val)
 				if err != nil {
-					log.Errorf("Error '%s' while unparsing UUID for value: %v\n", err, value)
+					log.Errorf("error '%s' while unparsing UUID for value: %v\n", err, value)
 		    	}
 				checks++	//Just to see how many checks we made, for statistical purposes
 				if avatarKey == val.UUID {
@@ -541,9 +538,10 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 		}
 		iter.Release()
 		err = iter.Error()
+		checkErr(err)
 		db.Close()
 	}
-	log.Debugf("Made %d checks for '%s' in %v\n", checks, avatarKey, time.Since(time_start))
+	log.Debugf("made %d checks for '%s' in %v\n", checks, avatarKey, time.Since(time_start))
 	return found, val.Grid
 }
 
@@ -587,8 +585,8 @@ func importDatabase(filename string) {
 				}
 			}
 			if limit % goslConfig.BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
-				log.Info("Processing:", limit)
-				err = txn.Commit(nil)
+				log.Info("processing:", limit)
+				err = txn.Commit()
 				if err != nil {
 				    log.Fatal(err)
 				}
@@ -598,11 +596,10 @@ func importDatabase(filename string) {
 			}
 		}
 		// commit last batch
-		err = txn.Commit(nil)
+		err = txn.Commit()
 		if err != nil {
 		    log.Fatal(err)
 		}
-		kv.PurgeOlderVersions()
 	} else if *goslConfig.database == "buntdb" {
 		db, err := buntdb.Open(goslConfig.dbNamePath)
 		checkErrPanic(err)
@@ -630,7 +627,7 @@ func importDatabase(filename string) {
 				}
 			}
 			if limit % goslConfig.BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
-				log.Info("Processing:", limit)
+				log.Info("processing:", limit)
 				err = txn.Commit()
 				if err != nil {
 				    log.Fatal(err)
@@ -667,7 +664,7 @@ func importDatabase(filename string) {
 				batch.Put([]byte(record[1]), jsonNewEntry)
 			}
 			if limit % goslConfig.BATCH_BLOCK == 0 && limit != 0 {
-				log.Info("Processing:", limit)
+				log.Info("processing:", limit)
 				err = db.Write(batch, nil)
 				if err != nil {
 				    log.Fatal(err)
@@ -683,9 +680,9 @@ func importDatabase(filename string) {
 		}
 		batch.Reset()	// reset it and let the garbage collector run
 		runtime.GC()
-		db.CompactRange(util.Range{ nil, nil })
+		db.CompactRange(util.Range{Start: nil, Limit: nil})
 	}
-	log.Info("Total read", limit, "records (or thereabouts) in", time.Since(time_start))
+	log.Info("total read", limit, "records (or thereabouts) in", time.Since(time_start))
 }
 
 // NOTE(gwyneth): Auxiliary functions which I'm always using...

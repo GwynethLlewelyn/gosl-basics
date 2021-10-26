@@ -1,0 +1,20 @@
+[config]
+BATCH_BLOCK	= 100000
+myPort		= 3000
+myDir		= "slkvdb"
+isServer	= false
+isShell		= false
+database	= "badger" # badger, buntdb, leveldb
+
+[options]
+importFilename = "" # set to "name2key.csv.bz2" (or any similar name) to actually do an import
+noMemory	= true # usually necessary for FastCGI configurations
+
+[BuntDB]
+dbNamePath	= ""
+
+[log]
+Filename	= "gosl.log"
+MaxSize		= 10 # MBytes
+MaxBackups	= 3
+MaxAge		= 28 # days

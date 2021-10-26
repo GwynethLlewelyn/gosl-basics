@@ -14,8 +14,8 @@ func TestMmap(t *testing.T) {
 	for i = 1; i < 8; i++ {
 		flags := os.O_RDWR | os.O_CREATE | os.O_EXCL
 		f, err := os.OpenFile("test.md", flags, 0666)
-		defer f.Close()
 		y.Check(err)
+		defer f.Close()
 	//	size := int64(256 * 1024 * 1024)
 		t.Logf("Size is : %v", i*Size)
 		_, err = y.Mmap(f,false,i*Size)
