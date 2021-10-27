@@ -7,7 +7,7 @@ isShell		= false
 database	= "badger" # badger, buntdb, leveldb
 
 [options]
-importFilename = "" # set to "name2key.csv.bz2" (or any similar name) to actually do an import
+importFilename = "slkvdb/name2key.csv.bz2" # set to "name2key.csv.bz2" (or any similar name) to actually do an import
 noMemory	= true # usually necessary for FastCGI configurations
 
 [BuntDB]

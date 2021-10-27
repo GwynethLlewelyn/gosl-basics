@@ -20,6 +20,7 @@ import (
 	"github.com/dgraph-io/badger/v3"
 //	"github.com/dgraph-io/badger/options"
 //	"github.com/fsnotify/fsnotify"
+	"github.com/h2non/filetype"
 	"github.com/op/go-logging"
 	flag "github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -182,24 +183,8 @@ func main() {
 		checkErrPanic(err) // cannot make directory, panic and exit logging what went wrong
 		log.Debugf("created new directory: %s\n", *goslConfig.myDir)
 	}
-	if *goslConfig.database == "badger" {
-		// Badger v3 - fully rewritten configuration (much simpler!!) (gwyneth 20211026)
-		if *goslConfig.noMemory  {
-			// use disk
-			Opt = badger.DefaultOptions(*goslConfig.myDir)
-		} else {
-			// Use only memory
-			Opt = badger.DefaultOptions("").WithInMemory(true)
-			Opt.ValueDir = Opt.Dir	// probably not needed
-			Opt.LevelSizeMultiplier = 1
-			Opt.NumMemtables = 1
-		}
-		// common configuration
 
-		goslConfig.BATCH_BLOCK = 1000	// try to import less at each time, it will take longer but hopefully work
-		log.Info("trying to avoid too much memory consumption")
-	}
-	// Do some testing to see if the database is available
+	// Prepare testing data! (common to all types)
 	const testAvatarName = "Nobody Here"
 	var err error
 
@@ -208,8 +193,25 @@ func main() {
 	jsonTestValue, err := json.Marshal(testValue)
 	checkErrPanic(err) // something went VERY wrong
 
+	// KVDB Initialisation & Tests
+	// Each case is different
 	switch *goslConfig.database {
 		case "badger":
+			// Badger v3 - fully rewritten configuration (much simpler!!) (gwyneth 20211026)
+			if *goslConfig.noMemory  {
+				// use disk; note that unlike the others, Badger generates its own filenames,
+				// we can only pass a _directory_... (gwyneth 20211027)
+				Opt = badger.DefaultOptions(*goslConfig.myDir)
+			} else {
+				// Use only memory
+				Opt = badger.DefaultOptions("").WithInMemory(true)
+				Opt.ValueDir = Opt.Dir	// probably not needed
+				Opt.LevelSizeMultiplier = 1
+				Opt.NumMemtables = 1
+			}
+			goslConfig.BATCH_BLOCK = 1000	// try to import less at each time, it will take longer but hopefully work
+			log.Info("trying to avoid too much memory consumption")
+			// Badger setup is ready, now the rest is similar to the others
 			kv, err := badger.Open(Opt)
 			checkErrPanic(err) // should probably panic, cannot prep new database
 			txn := kv.NewTransaction(true)
@@ -224,7 +226,7 @@ func main() {
 			if *goslConfig.myDir[len(*goslConfig.myDir)-1] != os.PathSeparator {
 				*goslConfig.myDir = append(*goslConfig.myDir + os.PathSeparator
 			} */
-			goslConfig.dbNamePath = *goslConfig.myDir + string(os.PathSeparator) + databaseName
+			goslConfig.dbNamePath = filepath.Join(*goslConfig.myDir, databaseName)
 			db, err := buntdb.Open(goslConfig.dbNamePath)
 			checkErrPanic(err)
 			err = db.Update(func(tx *buntdb.Tx) error {
@@ -235,7 +237,7 @@ func main() {
 			log.Debugf("buntdb SET %+v (json: %v)\n", testValue, string(jsonTestValue))
 			db.Close()
 		case "leveldb":
-			goslConfig.dbNamePath = *goslConfig.myDir + string(os.PathSeparator) + databaseName
+			goslConfig.dbNamePath = filepath.Join(*goslConfig.myDir, databaseName)
 			db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
 			checkErrPanic(err)
 			err = db.Put([]byte(testAvatarName), jsonTestValue, nil)
@@ -252,6 +254,9 @@ func main() {
 		log.Info("attempting to import", *goslConfig.importFilename, "...")
 		importDatabase(*goslConfig.importFilename)
 		log.Info("database finished import.")
+	} else {
+		// it's not an error if there is no nam2key database available for import (gwyneth 20211027)
+		log.Warning("no database configured for import")
 	}
 
 	if *goslConfig.isShell {
@@ -456,87 +461,88 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 	var val = avatarUUID{ NullUUID, "" }
 	var found string
 
-	if *goslConfig.database == "badger" {
-		kv, err := badger.Open(Opt)
-		checkErr(err) // should probably panic
-		itOpt := badger.DefaultIteratorOptions
-/*
-		if !*goslConfig.noMemory {
-			itOpt.PrefetchValues = true
-			itOpt.PrefetchSize = 1000	// attempt to get this a little bit more efficient; we have many small entries, so this is not too much
-		} else {
-*/
-			itOpt.PrefetchValues = false // allegedly this is supposed to be WAY faster...
-// 		}
-		txn := kv.NewTransaction(true)
-		defer txn.Discard()
+	switch *goslConfig.database {
+		case "badger":
+			kv, err := badger.Open(Opt)
+			checkErr(err) // should probably panic
+			itOpt := badger.DefaultIteratorOptions
+	/*
+			if !*goslConfig.noMemory {
+				itOpt.PrefetchValues = true
+				itOpt.PrefetchSize = 1000	// attempt to get this a little bit more efficient; we have many small entries, so this is not too much
+			} else {
+	*/
+				itOpt.PrefetchValues = false // allegedly this is supposed to be WAY faster...
+	// 		}
+			txn := kv.NewTransaction(true)
+			defer txn.Discard()
 
-		err = kv.View(func(txn *badger.Txn) error {
-			itr := txn.NewIterator(itOpt)
-			defer itr.Close()
-			for itr.Rewind(); itr.Valid(); itr.Next() {
-				item := itr.Item()
-				data, err := item.ValueCopy(nil)
-				if err != nil {
-					log.Errorf("error %q while getting data from %v\n", err, item)
-					return err
-		    	}
-		    	if err = json.Unmarshal(data, &val); err != nil {
-					log.Errorf("error %q while unparsing UUID for data: %v\n", err, data)
-					return err
+			err = kv.View(func(txn *badger.Txn) error {
+				itr := txn.NewIterator(itOpt)
+				defer itr.Close()
+				for itr.Rewind(); itr.Valid(); itr.Next() {
+					item := itr.Item()
+					data, err := item.ValueCopy(nil)
+					if err != nil {
+						log.Errorf("error %q while getting data from %v\n", err, item)
+						return err
+			    	}
+			    	if err = json.Unmarshal(data, &val); err != nil {
+						log.Errorf("error %q while unparsing UUID for data: %v\n", err, data)
+						return err
+			    	}
+					checks++	//Just to see how many checks we made, for statistical purposes
+					if avatarKey == val.UUID {
+						found = string(item.Key())
+						break
+					}
+				}
+				return nil
+			})
+			checkErr(err)
+			kv.Close()
+		case "buntdb":
+			db, err := buntdb.Open(goslConfig.dbNamePath)
+			checkErrPanic(err)
+			err = db.View(func(tx *buntdb.Tx) error {
+				err := tx.Ascend("", func(key, value string) bool {
+			    	if err = json.Unmarshal([]byte(value), &val); err != nil {
+						log.Errorf("error %q while unparsing UUID for value: %v\n", err, value)
+			    	}
+					checks++	//Just to see how many checks we made, for statistical purposes
+					if avatarKey == val.UUID {
+						found = key
+						return false
+					}
+					return true
+			    })
+			    return err
+			})
+			db.Close()
+		case "leveldb":
+			db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
+			checkErrPanic(err)
+			iter := db.NewIterator(nil, nil)
+			for iter.Next() {
+				// Remember that the contents of the returned slice should not be modified, and
+				// only valid until the next call to Next.
+				key := iter.Key()
+				value := iter.Value()
+		    	if err = json.Unmarshal(value, &val); err != nil {
+					log.Errorf("error %q while unparsing UUID for data: %v\n", err, value)
+					continue // a bit insane, but at least we will skip a few broken records
 		    	}
 				checks++	//Just to see how many checks we made, for statistical purposes
 				if avatarKey == val.UUID {
-					found = string(item.Key())
+					found = string(key)
 					break
 				}
 			}
-			return nil
-		})
-		checkErr(err)
-		kv.Close()
-	} else if *goslConfig.database == "buntdb" {
-		db, err := buntdb.Open(goslConfig.dbNamePath)
-		checkErrPanic(err)
-		err = db.View(func(tx *buntdb.Tx) error {
-			err := tx.Ascend("", func(key, value string) bool {
-		    	if err = json.Unmarshal([]byte(value), &val); err != nil {
-					log.Errorf("error %q while unparsing UUID for value: %v\n", err, value)
-		    	}
-				checks++	//Just to see how many checks we made, for statistical purposes
-				if avatarKey == val.UUID {
-					found = key
-					return false
-				}
-				return true
-		    })
-		    return err
-		})
-		db.Close()
-	} else if *goslConfig.database == "leveldb" {
-		db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
-		checkErrPanic(err)
-		iter := db.NewIterator(nil, nil)
-		for iter.Next() {
-			// Remember that the contents of the returned slice should not be modified, and
-			// only valid until the next call to Next.
-			key := iter.Key()
-			value := iter.Value()
-	    	if err = json.Unmarshal(value, &val); err != nil {
-				log.Errorf("error %q while unparsing UUID for data: %v\n", err, value)
-				continue // a bit insane, but at least we will skip a few broken records
-	    	}
-			checks++	//Just to see how many checks we made, for statistical purposes
-			if avatarKey == val.UUID {
-				found = string(key)
-				break
-			}
-		}
-		iter.Release()
-		err = iter.Error()
-		checkErr(err)
-		db.Close()
-	}
+			iter.Release()
+			err = iter.Error()
+			checkErr(err)
+			db.Close()
+	} // /switch
 	log.Debugf("made %d checks for %q in %v\n", checks, avatarKey, time.Since(time_start))
 	return found, val.Grid
 }
@@ -550,6 +556,11 @@ func importDatabase(filename string) {
 		log.Fatal(err)
 	}
 	defer filehandler.Close()
+
+	// First, check if we _do_ have a gzipped file or not...
+
+
+
 	gr := bzip2.NewReader(filehandler) // open bzip2 reader
 	cr := csv.NewReader(gr)  // open csv reader and feed the bzip2 reader into it
 
