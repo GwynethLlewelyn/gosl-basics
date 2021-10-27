@@ -410,8 +410,7 @@ func searchKVname(avatarName string) (UUID string, grid string) {
 					log.Errorf("error %q while getting data from %v\n", err, item)
 					return err
 		    	}
-		    	err = json.Unmarshal(data, &val)
-				if err != nil {
+		    	if err = json.Unmarshal(data, &val); err != nil {
 					log.Errorf("error while unparsing UUID for name: %q (%v)\n", avatarName, err)
 					return err
 		    	}
@@ -439,8 +438,7 @@ func searchKVname(avatarName string) (UUID string, grid string) {
 			if err != nil {
 				log.Errorf("error while getting UUID for name: %q (%v)\n", avatarName, err)
 	    	} else {
-		    	err = json.Unmarshal(data, &val)
-				if err != nil {
+		    	if err = json.Unmarshal(data, &val); err != nil {
 					log.Errorf("error while unparsing UUID for name: %q (%v)\n", avatarName, err)
 	    		}
 	    	}
@@ -483,8 +481,7 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 					log.Errorf("error %q while getting data from %v\n", err, item)
 					return err
 		    	}
-		    	err = json.Unmarshal(data, &val)
-				if err != nil {
+		    	if err = json.Unmarshal(data, &val); err != nil {
 					log.Errorf("error %q while unparsing UUID for data: %v\n", err, data)
 					return err
 		    	}
@@ -503,8 +500,7 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 		checkErrPanic(err)
 		err = db.View(func(tx *buntdb.Tx) error {
 			err := tx.Ascend("", func(key, value string) bool {
-		    	err = json.Unmarshal([]byte(value), &val)
-				if err != nil {
+		    	if err = json.Unmarshal([]byte(value), &val); err != nil {
 					log.Errorf("error %q while unparsing UUID for value: %v\n", err, value)
 		    	}
 				checks++	//Just to see how many checks we made, for statistical purposes
@@ -526,8 +522,7 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 			// only valid until the next call to Next.
 			key := iter.Key()
 			value := iter.Value()
-	    	err = json.Unmarshal(value, &val)
-			if err != nil {
+	    	if err = json.Unmarshal(value, &val); err != nil {
 				log.Errorf("error %q while unparsing UUID for data: %v\n", err, value)
 				continue // a bit insane, but at least we will skip a few broken records
 	    	}
@@ -561,127 +556,121 @@ func importDatabase(filename string) {
 	limit := 0	// outside of for loop so that we can count how many entries we had in total
 	time_start := time.Now() // we want to get an idea on how long this takes
 
-	if *goslConfig.database == "badger" {
-		// prepare connection to KV database
-		kv, err := badger.Open(Opt)
-		checkErrPanic(err) // should probably panic
-		defer kv.Close()
+	switch *goslConfig.database {
+		case "badger":
+			// prepare connection to KV database
+			kv, err := badger.Open(Opt)
+			checkErrPanic(err) // should probably panic
+			defer kv.Close()
 
-		txn := kv.NewTransaction(true) // start new transaction; we will commit only every BATCH_BLOCK entries
-		defer txn.Discard()
-		for ;;limit++ {
-			record, err := cr.Read()
-			if err == io.EOF {
-				break
-			} else if err != nil {
-				log.Fatal(err)
-			}
-			jsonNewEntry, err := json.Marshal(avatarUUID{ record[0], "Production" }) // W-Hat keys come all from the main LL grid, known as 'Production'
-			if err != nil {
-				log.Warning(err)
-			} else {
-				err = txn.Set([]byte(record[1]), jsonNewEntry)
+			txn := kv.NewTransaction(true) // start new transaction; we will commit only every BATCH_BLOCK entries
+			defer txn.Discard()
+			for ;;limit++ {
+				record, err := cr.Read()
+				if err == io.EOF {
+					break
+				} else if err != nil {
+					log.Fatal(err)
+				}
+				jsonNewEntry, err := json.Marshal(avatarUUID{ record[0], "Production" }) // W-Hat keys come all from the main LL grid, known as 'Production'
 				if err != nil {
-				    log.Fatal(err)
+					log.Warning(err)
+				} else {
+					if err = txn.Set([]byte(record[1]), jsonNewEntry); err != nil {
+					    log.Fatal(err)
+					}
+				}
+				if limit % goslConfig.BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
+					log.Info("processing:", limit)
+					if err = txn.Commit(); err != nil {
+					    log.Fatal(err)
+					}
+					runtime.GC()
+					txn = kv.NewTransaction(true) // start a new transaction
+					defer txn.Discard()
 				}
 			}
-			if limit % goslConfig.BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
-				log.Info("processing:", limit)
-				err = txn.Commit()
-				if err != nil {
-				    log.Fatal(err)
-				}
-				runtime.GC()
-				txn = kv.NewTransaction(true) // start a new transaction
-				defer txn.Discard()
+			// commit last batch
+			if err = txn.Commit(); err != nil {
+			    log.Fatal(err)
 			}
-		}
-		// commit last batch
-		err = txn.Commit()
-		if err != nil {
-		    log.Fatal(err)
-		}
-	} else if *goslConfig.database == "buntdb" {
-		db, err := buntdb.Open(goslConfig.dbNamePath)
-		checkErrPanic(err)
-		defer db.Close()
+		case "buntdb":
+			db, err := buntdb.Open(goslConfig.dbNamePath)
+			checkErrPanic(err)
+			defer db.Close()
 
-		txn, err := db.Begin(true)
-		checkErrPanic(err)
-		//defer txn.Commit()
+			txn, err := db.Begin(true)
+			checkErrPanic(err)
+			//defer txn.Commit()
 
-		// very similar to Badger code...
-		for ;;limit++ {
-			record, err := cr.Read()
-			if err == io.EOF {
-				break
-			} else if err != nil {
-				log.Fatal(err)
-			}
-			jsonNewEntry, err := json.Marshal(avatarUUID{ record[0], "Production" })
-			if err != nil {
-				log.Warning(err)
-			} else {
-				_, _, err = txn.Set(record[1], string(jsonNewEntry), nil)
+			// very similar to Badger code...
+			for ;;limit++ {
+				record, err := cr.Read()
+				if err == io.EOF {
+					break
+				} else if err != nil {
+					log.Fatal(err)
+				}
+				jsonNewEntry, err := json.Marshal(avatarUUID{ record[0], "Production" })
 				if err != nil {
-				    log.Fatal(err)
+					log.Warning(err)
+				} else {
+					_, _, err = txn.Set(record[1], string(jsonNewEntry), nil)
+					if err != nil {
+					    log.Fatal(err)
+					}
+				}
+				if limit % goslConfig.BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
+					log.Info("processing:", limit)
+					if err = txn.Commit(); err != nil {
+					    log.Fatal(err)
+					}
+					runtime.GC()
+					txn, err = db.Begin(true)  // start a new transaction
+					checkErrPanic(err)
+					//defer txn.Commit()
 				}
 			}
-			if limit % goslConfig.BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
-				log.Info("processing:", limit)
-				err = txn.Commit()
-				if err != nil {
-				    log.Fatal(err)
-				}
-				runtime.GC()
-				txn, err = db.Begin(true)  // start a new transaction
-				checkErrPanic(err)
-				//defer txn.Commit()
+			// commit last batch
+			if err = txn.Commit(); err != nil {
+			    log.Fatal(err)
 			}
-		}
-		// commit last batch
-		err = txn.Commit()
-		if err != nil {
-		    log.Fatal(err)
-		}
-		db.Shrink()
-	} else if *goslConfig.database == "leveldb" {
-		db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
-		checkErrPanic(err)
-		defer db.Close()
-		batch := new(leveldb.Batch)
+			db.Shrink()
+		case "leveldb":
+			db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
+			checkErrPanic(err)
+			defer db.Close()
+			batch := new(leveldb.Batch)
 
-		for ;;limit++ {
-			record, err := cr.Read()
-			if err == io.EOF {
-				break
-			} else if err != nil {
-				log.Fatal(err)
-			}
-			jsonNewEntry, err := json.Marshal(avatarUUID{ record[0], "Production" })
-			if err != nil {
-				log.Warning(err)
-			} else {
-				batch.Put([]byte(record[1]), jsonNewEntry)
-			}
-			if limit % goslConfig.BATCH_BLOCK == 0 && limit != 0 {
-				log.Info("processing:", limit)
-				err = db.Write(batch, nil)
-				if err != nil {
-				    log.Fatal(err)
+			for ;;limit++ {
+				record, err := cr.Read()
+				if err == io.EOF {
+					break
+				} else if err != nil {
+					log.Fatal(err)
 				}
-				batch.Reset()	// unlike the others, we don't need to create a new batch every time
-				runtime.GC()	// it never hurts...
+				jsonNewEntry, err := json.Marshal(avatarUUID{ record[0], "Production" })
+				if err != nil {
+					log.Warning(err)
+				} else {
+					batch.Put([]byte(record[1]), jsonNewEntry)
+				}
+				if limit % goslConfig.BATCH_BLOCK == 0 && limit != 0 {
+					log.Info("processing:", limit)
+					if err = db.Write(batch, nil); err != nil {
+					    log.Fatal(err)
+					}
+					batch.Reset()	// unlike the others, we don't need to create a new batch every time
+					runtime.GC()	// it never hurts...
+				}
 			}
-		}
-		// commit last batch
-		err = db.Write(batch, nil)
-		if err != nil {
-		    log.Fatal(err)
-		}
-		batch.Reset()	// reset it and let the garbage collector run
-		runtime.GC()
-		db.CompactRange(util.Range{Start: nil, Limit: nil})
+			// commit last batch
+			if err = db.Write(batch, nil); err != nil {
+			    log.Fatal(err)
+			}
+			batch.Reset()	// reset it and let the garbage collector run
+			runtime.GC()
+			db.CompactRange(util.Range{Start: nil, Limit: nil})
 	}
 	log.Info("total read", limit, "records (or thereabouts) in", time.Since(time_start))
 }
