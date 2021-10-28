@@ -569,6 +569,11 @@ func importDatabase(filename string) {
 
 	kind, err := filetype.Match(head)
 	checkErr(err)
+	// Now rewind the file to the start. (gwyneth 20211028)
+	position, err := filehandler.Seek(0, 0)
+	if position != 0 || err != nil {
+		log.Error("could not rewind the file to the start position")
+	}
 
 	var cr *csv.Reader	// CSV reader needs to be declared here because of scope issues. (gwyneth 20211027)
 
