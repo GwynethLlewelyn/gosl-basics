@@ -580,7 +580,8 @@ func importDatabase(filename string) {
 			gr := bzip2.NewReader(filehandler) // open bzip2 reader
 			cr = csv.NewReader(gr)  // open csv reader and feed the bzip2 reader into it
 		case matchers.TypeGz:
-			zr := gzip.NewReader(filehandler) // open gzip reader
+			zr, err := gzip.NewReader(filehandler) // open gzip reader
+			checkErr(err)
 			cr = csv.NewReader(zr)  // open csv reader and feed the bzip2 reader into it
 		default:
 			// We just assume that it's a CSV (uncompressed) file and open it.
