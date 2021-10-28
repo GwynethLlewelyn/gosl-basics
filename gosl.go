@@ -68,6 +68,7 @@ type goslConfigOptions struct {
 }
 
 var goslConfig goslConfigOptions
+var kv *badger.DB
 
 // loadConfiguration reads our configuration from a config.toml file
 func loadConfiguration() {
@@ -175,22 +176,27 @@ func main() {
 		logging.SetBackend(backendFileLeveled)	// FastCGI only logs to file
 	}
 
-	// Check if this directory actually exists; if not, create it. Panic if something wrong happens (we cannot proceed without a valid directory for the database to be written
+	// Check if this directory actually exists; if not, create it. Panic if something wrong happens (we cannot proceed without a valid directory for the database to be written)
 	if stat, err := os.Stat(*goslConfig.myDir); err == nil && stat.IsDir() {
 		// path is a valid directory
-		log.Infof("valid directory: %s\n", *goslConfig.myDir)
+		log.Infof("valid directory: %q\n", *goslConfig.myDir)
 	} else {
 		// try to create directory
-		err = os.Mkdir(*goslConfig.myDir, 0700)
-		checkErrPanic(err) // cannot make directory, panic and exit logging what went wrong
-		log.Debugf("created new directory: %s\n", *goslConfig.myDir)
+		if err = os.Mkdir(*goslConfig.myDir, 0700); err != nil {
+			if err != os.ErrExist {
+				checkErr(err)
+			} else {
+				log.Debugf("directory %q exists, no need to create it\n", *goslConfig.myDir)
+			}
+		}
+		log.Debugf("created new directory: %q\n", *goslConfig.myDir)
 	}
 
 	// Prepare testing data! (common to all types)
 	const testAvatarName = "Nobody Here"
 	var err error
 
-	log.Info("gosl started and logging is set up. Proceeding to test database (" + *goslConfig.database + ") at " + *goslConfig.myDir)
+	log.Infof("gosl started and logging is set up. Proceeding to test database (%s) at %q\n",*goslConfig.database, *goslConfig.myDir)
 	var testValue = avatarUUID{ NullUUID, "all grids" }
 	jsonTestValue, err := json.Marshal(testValue)
 	checkErrPanic(err) // something went VERY wrong
@@ -203,14 +209,30 @@ func main() {
 			if *goslConfig.noMemory  {
 				// use disk; note that unlike the others, Badger generates its own filenames,
 				// we can only pass a _directory_... (gwyneth 20211027)
-				Opt = badger.DefaultOptions(*goslConfig.myDir)
+				goslConfig.dbNamePath = filepath.Join(*goslConfig.myDir, databaseName)
+				// try to create directory
+				if err = os.Mkdir(goslConfig.dbNamePath, 0700); err != nil {
+					if err != os.ErrExist {
+						checkErr(err)
+					} else {
+						log.Debugf("directory %q exists, no need to create it\n", goslConfig.dbNamePath)
+					}
+				} else {
+					log.Debugf("created new directory: %q\n", goslConfig.dbNamePath)
+				}
+
+				Opt = badger.DefaultOptions(goslConfig.dbNamePath)
+				log.Debugf("entering disk mode, Opt is %+v\n", Opt)
 			} else {
 				// Use only memory
-				Opt = badger.DefaultOptions("").WithInMemory(true)
-				Opt.ValueDir = Opt.Dir	// probably not needed
+				Opt = badger.LSMOnlyOptions("").WithInMemory(true)
 				Opt.LevelSizeMultiplier = 1
 				Opt.NumMemtables = 1
+				log.Debugf("entering memory-only mode, Opt is %+v\n", Opt)
 			}
+			// common config
+			Opt.ValueDir = Opt.Dir	// probably not needed
+			Opt.Logger = log	// set the internal logger to our own rotating logger
 			goslConfig.BATCH_BLOCK = 1000	// try to import less at each time, it will take longer but hopefully work
 			log.Info("trying to avoid too much memory consumption")
 			// Badger setup is ready, now the rest is similar to the others
@@ -296,7 +318,7 @@ func main() {
 	log.Info("directory for database:", *goslConfig.myDir)
 
 	if (*goslConfig.isServer) {
-		log.Info("starting to run as web server on port " + *goslConfig.myPort)
+		log.Info("starting to run as web server on port :" + *goslConfig.myPort)
 		err := http.ListenAndServe(":" + *goslConfig.myPort, nil) // set listen port
 		checkErrPanic(err) // if it can't listen to all the above, then it has to abort anyway
 	} else {
@@ -721,7 +743,7 @@ func importDatabase(filename string) {
 func checkErrPanic(err error) {
 	if err != nil {
 		pc, file, line, ok := runtime.Caller(1)
-		log.Panic(filepath.Base(file), ":", line, ":", pc, ok, " - panic:", err)
+		log.Panicf("%s:%d (%v) [ok: %v] - panic: %v\n", filepath.Base(file), line, pc, ok, err)
 	}
 }
 // checkErr checks if there is an error, and if yes, it logs it out and continues.
@@ -729,7 +751,8 @@ func checkErrPanic(err error) {
 func checkErr(err error) {
 	if err != nil {
 		pc, file, line, ok := runtime.Caller(1)
-		log.Error(filepath.Base(file), ":", line, ":", pc, ok, " - error:", err)
+		// log.Error(filepath.Base(file), ":", line, ":", pc, ok, " - error:", err)
+		log.Errorf("%s:%d (%v) [ok: %v] - panic: %v\n", filepath.Base(file), line, pc, ok, err)
 	}
 }
 
