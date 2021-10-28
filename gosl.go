@@ -4,6 +4,7 @@ package main
 import (
 	"bufio"
 	"compress/bzip2"
+	"compress/gzip"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -21,6 +22,7 @@ import (
 //	"github.com/dgraph-io/badger/options"
 //	"github.com/fsnotify/fsnotify"
 	"github.com/h2non/filetype"
+	"github.com/h2non/filetype/matchers"
 	"github.com/op/go-logging"
 	flag "github.com/spf13/pflag"
 	"github.com/spf13/viper"
@@ -558,11 +560,32 @@ func importDatabase(filename string) {
 	defer filehandler.Close()
 
 	// First, check if we _do_ have a gzipped file or not...
+	// We'll use a small library for that (gwyneth 20211027)
 
+	// We only have to pass the file header = first 261 bytes
+	head := make([]byte, 261)
+	_, err = filehandler.Read(head)
+	checkErr(err)
 
+	kind, err := filetype.Match(head)
+	checkErr(err)
 
-	gr := bzip2.NewReader(filehandler) // open bzip2 reader
-	cr := csv.NewReader(gr)  // open csv reader and feed the bzip2 reader into it
+	var cr *csv.Reader	// CSV reader needs to be declared here because of scope issues. (gwyneth 20211027)
+
+	// Technically, we could match for a lot of archives and get a io.Reader for each.
+	// However, W-Hat has a limited selection of archives available (currently gzip and bzip2)
+	// so we limit ourselves to these two, falling back to plaintext (gwyneth 20211027).
+	switch kind {
+		case matchers.TypeBz2:
+			gr := bzip2.NewReader(filehandler) // open bzip2 reader
+			cr = csv.NewReader(gr)  // open csv reader and feed the bzip2 reader into it
+		case matchers.TypeGz:
+			zr := gzip.NewReader(filehandler) // open gzip reader
+			cr = csv.NewReader(zr)  // open csv reader and feed the bzip2 reader into it
+		default:
+			// We just assume that it's a CSV (uncompressed) file and open it.
+			cr = csv.NewReader(filehandler)
+	}
 
 	limit := 0	// outside of for loop so that we can count how many entries we had in total
 	time_start := time.Now() // we want to get an idea on how long this takes

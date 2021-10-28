@@ -5,6 +5,7 @@ go 1.17
 require (
 	github.com/dgraph-io/badger v1.6.2
 	github.com/dgraph-io/badger/v3 v3.2011.1
+	github.com/h2non/filetype v1.1.1
 	github.com/op/go-logging v0.0.0-20160315200505-970db520ece7
 	github.com/spf13/pflag v1.0.5
 	github.com/spf13/viper v1.7.1
