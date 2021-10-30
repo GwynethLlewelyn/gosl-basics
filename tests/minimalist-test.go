@@ -12,8 +12,8 @@ import (
 func main() {
 	// Open the Badger database located in the /tmp/badger directory.
 	// It will be created if it doesn't exist.
-	//db, err := badger.Open(badger.DefaultOptions("slkvdb/gosl-database.db"))
-	db, err := badger.Open(badger.DefaultOptions("/tmp/badger"))
+	// db, err := badger.Open(badger.DefaultOptions("/tmp/badger"))
+	db, err := badger.Open(badger.DefaultOptions("slkvdb/gosl-database.db"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -58,5 +58,7 @@ func main() {
 
 // Handles errors for this very simple test.
 func handle(err error) {
-	fmt.Printf("error was: %q\n", err)
+	if err != nil {
+		fmt.Printf("error was: %q\n", err)
+	}
 }
