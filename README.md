@@ -26,23 +26,31 @@ Requirements:
 
 Finally, `go get git.gwynethllewelyn.net/GwynethLlewelyn/gosl-basics.git`, and you _ought_ to have a binary executable file in `~/go/bin` called `gosl-basics.git`. Just run it!
 
-Then grab the two LSL scripts, `query.lsl` and `touch.lsl`, which ought to be in `~go/src/git.gwynethllewelyn.net/GwynethLlewelyn/gosl-basics`. The first runs queries: you touch to activate it, write the name of an avatar in chat using '/5 firstname lastname', and it replies with the avatar key (after a timeout, the script resets, giving another person a chance to try it out). The second script is to be placed on anything touchable to grab avatar names and keys and send it to your own database. You can, of course, use other methods to grab those; as an exercise, use a Sensor instead, or — even better and consuming much less resources — use a transparent, phantom prim across a place where people have no choice but to go through, and register names & keys as avatars 'bump' into that prim! There are more exotic alternatives, such as registering the name & key when an avatar sits on the prim; or using a llCastRay to figure out if there is anybody nearby. Lots of possibilities! :-) 
+Then grab the two LSL scripts, `query.lsl` and `touch.lsl`, which ought to be in `~go/src/git.gwynethllewelyn.net/GwynethLlewelyn/gosl-basics`. The first runs queries: you touch to activate it, write the name of an avatar in chat using '/5 firstname lastname', and it replies with the avatar key (after a timeout, the script resets, giving another person a chance to try it out). The second script is to be placed on anything touchable to grab avatar names and keys and send it to your own database. You can, of course, use other methods to grab those; as an exercise, use a Sensor instead, or — even better and consuming much less resources — use a transparent, phantom prim across a place where people have no choice but to go through, and register names & keys as avatars 'bump' into that prim! There are more exotic alternatives, such as registering the name & key when an avatar sits on the prim; or using a llCastRay to figure out if there is anybody nearby. Lots of possibilities! :-)
 
 If something went wrong, you might need to download all external packages manually. Theoretically, the `go get` command is supposed to be clever enough to figure out everything it needs and download _everything_ automatically, but we all know how complex systems manage to fail, don't we? So, if needed, these are all the external packages (i.e. not part of the standard library) to be downloaded:
 
-	go get	"github.com/spf13/pflag"
-	go get	"github.com/dgraph-io/badger"
-	go get	"github.com/dgraph-io/badger/options"
-	go get	"github.com/fsnotify/fsnotify"
-	go get	"github.com/op/go-logging"
-	go get	"github.com/spf13/viper"
-	go get	"github.com/syndtr/goleveldb/leveldb"
-	go get	"github.com/syndtr/goleveldb/leveldb/util"
-	go get	"github.com/tidwall/buntdb"
-	go get	"gopkg.in/natefinch/lumberjack.v2"
+````sh
+go get github.com/dgraph-io/badger/v3
+go get github.com/h2non/filetype
+go get github.com/h2non/filetype/matchers
+go get github.com/op/go-logging
+go get github.com/spf13/pflag
+go get github.com/spf13/viper
+go get github.com/syndtr/goleveldb/leveldb
+go get github.com/syndtr/goleveldb/leveldb/util
+go get github.com/tidwall/buntdb
+go get gopkg.in/natefinch/lumberjack.v2
+````
 
 These are for 3 different key/value databases; handling command-line flags and a configuration file; a powerful logging system; and a way to rotate logs (a lumberjack... chops down logs... get it? :) Aye, Gophers have a sense of humour).
 
+**Note:** If modules are fully functional on your system, you ought to type this instead:
+
+````sh
+go mod tidy
+go get -u
+````
 
 ## Configuration
 You can run the executable either as:
@@ -54,7 +62,7 @@ You can run the executable either as:
       --port string       Server port (default "3000")
       --server            Run as server on port 3000
       --shell             Run as an interactive shell
-      	 
+
 Basically, if you are running your own server (possibly at home!), you only need to run `gosl-basics -server`. You don't need to set up Apache or nginx or any other third-party software; `gosl-basics` is a fully standalone application and does not depend on anything.
 
 If you're using a shared web server, like the ones provided by [Dreamhost](https://dreamhost.com), then you will very likely want to run `gosl-basics` as a FastCGI application. Why? Well, Dreamhost's Terms of Service explicitly forbid any application to be run all the time (to conserve memory, CPU slices, and, well, open ports). Instead, they offer the ability to run applications as FastCGI applications instead (under their own Apache). This is actually a very cool interface (as opposed to the ancient, non-fast CGI...) allowing parts of the setup of the application to be done when it is called the first time, and then launch requests on demand. _If_ there is a _lot_ of traffic, the application will actually remain active in memory/CPU for a long time! If it only gets sporadic calls once in a while, well, in that case, the application gets removed from memory until someone calls the URL again. I have not tested exhaustively, and this will certainly depend from provider to provider, but Dreamhost seems to allow the application to remain active in memory and in the process space for 30-60 seconds.
@@ -71,7 +79,7 @@ The `--shell` switch is mostly meant for debugging, namely, to figure out if the
 
 The `--nomemory` switch may seem weird, but in some scenarios, like shared servers with FastCGI and using the Badger database, the actual memory consumption may be limited, so this attempts to reduce the amount of necessary memory (things will run much slower, though; the good news is that there is _some_ caching).
 
-See below for instructions for importing CSV bzip2'ed databases using `--import`. The CSV file format is one pair **UUID,Avatar Name** per line, and all of that bzip2'ed. 
+See below for instructions for importing CSV bzip2'ed databases using `--import`. The CSV file format is one pair **UUID,Avatar Name** per line, and all of that bzip2'ed.
 
 ## Limitations
 
@@ -107,7 +115,7 @@ Now, one might argue that all this is due to Go's notoriously bad garbage colect
 
 So what is going on with Badger and BoltDB? Well, both have a 'compacting' algorithm — a separate thread which runs through the whole structure and tries to 'compact' the data as it is being written and/or deleted. My assumption (not being familiar with the code, even though it's open source and some of it relatively easy to understand) is that the compaction thread is playing havoc with Go's garbage collector — i.e. there is a race condition between both, the GC knowing that I've flagged some memory to be released, but the compacting thread 'stealing' some of that memory to look at freshly-written data to see if it can be further compacted. There might be a way to disable the compacting threads — at least under Badger this seems to be the case, but when I tried to do that, the application panicked instantly... — or fine-tune them in some way (trying to avoid allocating so much memory, for instance). But clearly neither solution has been designed for a very memory/CPU-constrained scenario; they achieve performance by assuming that almost everything is always loaded in RAM, and the rest comes from a SSD drive which can be instantly accessed.
 
-That explanation might make sense for _importing_ data (because that means that the K/V database is being written all the time), but it fails to explain why a simple _search_ requires that much memory (since nothing is being written, the compacting algorithm should not be running, etc.). Well, I can understand that some elements of the K/V database — all of which have a tree of some sort, usually a B+ tree or a LSM tree, or a variant — are being loaded on RAM first, and that means allocating enough RAM for 9 million records. Both Badger and BoltDB also have 'caches' for repeated queries, but in my experience, the time gained by reading from the cache is negligible compared to a 'fresh' query. And while all three feature 'iterators' — a way to go through the whole tree until a match is found, which is important for retrieving avatar names based on UUID — BoltDB and Badger are simply terrible at doing that: even on the Mac, with unlimited RAM and a SSD disk, they take almost a minute (half a minute if cached...) to go through all 9 million entries! That's certainly unacceptable, even though I'm perfectly aware that the correct solution would be to have _two_ databases, one for avatar name -> UUID, and the other from UUID -> avatar name; but for the purpose of this application I wanted to show how to iterate through a K/V database, as opposed to illustrate the _optimal_ method of using it. 
+That explanation might make sense for _importing_ data (because that means that the K/V database is being written all the time), but it fails to explain why a simple _search_ requires that much memory (since nothing is being written, the compacting algorithm should not be running, etc.). Well, I can understand that some elements of the K/V database — all of which have a tree of some sort, usually a B+ tree or a LSM tree, or a variant — are being loaded on RAM first, and that means allocating enough RAM for 9 million records. Both Badger and BoltDB also have 'caches' for repeated queries, but in my experience, the time gained by reading from the cache is negligible compared to a 'fresh' query. And while all three feature 'iterators' — a way to go through the whole tree until a match is found, which is important for retrieving avatar names based on UUID — BoltDB and Badger are simply terrible at doing that: even on the Mac, with unlimited RAM and a SSD disk, they take almost a minute (half a minute if cached...) to go through all 9 million entries! That's certainly unacceptable, even though I'm perfectly aware that the correct solution would be to have _two_ databases, one for avatar name -> UUID, and the other from UUID -> avatar name; but for the purpose of this application I wanted to show how to iterate through a K/V database, as opposed to illustrate the _optimal_ method of using it.
 
 Last but not least, I didn't bother to use transactions with LevelDB; this _might_ make a huge difference. Or perhaps not. The first version of Badger I've used (as said, Badger's API is in constant mutation) did also make transactions optional, and I didn't see any performance difference between using transactions or not using them (which, in a sense, shows how optimised the code is, i.e. using transactions does not make it visibly slower, and, naturally enough, makes all operations much safer). Badger also seems paranoid in making sure that data is _never_ lost, using an internal versioning system (I'm afraid I didn't delve much into it). All of this _might_ contribute for its slowness, and, since it's actively looking up at BoltDB as its direct 'competitor', it's not hard to see how both are constantly copying ideas from each other.
 
