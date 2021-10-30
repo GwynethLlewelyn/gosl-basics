@@ -43,6 +43,7 @@ package-lock.json
 *.so
 *.dylib
 gosl
+gosl-basics
 minimalist-test
 
 # Test binary, built with `go test -c`
