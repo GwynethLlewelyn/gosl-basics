@@ -5,9 +5,10 @@ myDir		= "slkvdb"
 isServer	= false
 isShell		= false
 database	= "badger" # badger, buntdb, leveldb
+databaseName = "gosl-database.db"
 
 [options]
-importFilename = "slkvdb/name2key.csv.bz2" # set to "name2key.csv.bz2" (or any similar name) to actually do an import
+importFilename = "slkvdb/name2key.new.csv.bz2" # set to "name2key.csv.bz2" (or any similar name) to actually do an import
 noMemory	= true # usually necessary for FastCGI configurations
 
 [BuntDB]

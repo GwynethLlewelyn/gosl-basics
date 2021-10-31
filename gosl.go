@@ -43,9 +43,12 @@ var logFormat logging.Formatter
 var Opt badger.Options
 
 // AvatarUUID is the type that we store in the database; we keep a record from which grid it came from.
+// Note that we will store both UUID -> AvatarName *and* AvatarName -> UUID on the same database,
+//  thus the apparent redundancy in fields! (gwyneth 20211030)
 type avatarUUID struct {
-	UUID string		// needs to be capitalised for JSON marshalling (it has to do with the way it works)
-	Grid string
+	AvatarName string	`json:"name" form:"name" binding:"required"`
+	UUID string			`json:"key" form:"key" binding:"required"`	// needs to be capitalised for JSON marshalling (it has to do with the way it works)
+	Grid string			`json:"grid" form:"grid"`
 }
 
 /*
@@ -197,7 +200,7 @@ func main() {
 	var err error
 
 	log.Infof("gosl started and logging is set up. Proceeding to test database (%s) at %q\n",*goslConfig.database, *goslConfig.myDir)
-	var testValue = avatarUUID{ NullUUID, "all grids" }
+	var testValue = avatarUUID{ testAvatarName, NullUUID, "all grids" }
 	jsonTestValue, err := json.Marshal(testValue)
 	checkErrPanic(err) // something went VERY wrong
 
@@ -338,9 +341,13 @@ func main() {
 
 // handler deals with incoming queries and/or associates avatar names with keys depending on parameters.
 // Basically we check if both an avatar name and a UUID key has been received: if yes, this means a new entry;
-//	if just the avatar name was received, it means looking up its key;
-//	if just the key was received, it means looking up the name (not necessary since llKey2Name does that, but it's just to illustrate);
-//	if nothing is received, then return an error
+// -	if just the avatar name was received, it means looking up its key;
+// -	if just the key was received, it means looking up the name (not necessary since llKey2Name does that, but it's just to illustrate);
+//	-	if nothing is received, then return an error
+// Note: to ensure quick lookups, we actually set *two* key/value pairs, one with avatar name/UUID,
+// the other with UUID/name — that way, we can efficiently search for *both* in the same database!
+// Theoretically, we could even have *two* KV databases, but that's too much trouble for the
+// sake of some extra efficiency (gwyneth 20211030)
 func handler(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		logErrHTTP(w, http.StatusNotFound, "no avatar and/or UUID received")
@@ -356,14 +363,14 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	name := r.Form.Get("name") // can be empty
 	key := r.Form.Get("key") // can be empty
 	compat := r.Form.Get("compat") // compatibility mode with W-Hat
-	var valueToInsert avatarUUID
+	var uuidToInsert avatarUUID
 	messageToSL := "" // this is what we send back to SL - defined here due to scope issues.
 	if name != "" {
 		if key != "" {
 			// we received both: add a new entry
-			valueToInsert.UUID = key
-			valueToInsert.Grid = r.Header.Get("X-Secondlife-Shard")
-			jsonValueToInsert, err := json.Marshal(valueToInsert)
+			uuidToInsert.UUID = key
+			uuidToInsert.Grid = r.Header.Get("X-Secondlife-Shard")
+			jsonUUIDToInsert, err := json.Marshal(uuidToInsert)
 			checkErr(err)
 			switch *goslConfig.database {
 				case "badger":
@@ -371,7 +378,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 					checkErrPanic(err) // should probably panic
 					txn := kv.NewTransaction(true)
 					defer txn.Discard()
-					err = txn.Set([]byte(name), jsonValueToInsert)
+					err = txn.Set([]byte(name), jsonUUIDToInsert)
 					checkErrPanic(err)
 					err = txn.Commit()
 					checkErrPanic(err)
@@ -381,18 +388,18 @@ func handler(w http.ResponseWriter, r *http.Request) {
 					checkErrPanic(err)
 					defer db.Close()
 					err = db.Update(func(tx *buntdb.Tx) error {
-						_, _, err := tx.Set(name, string(jsonValueToInsert), nil)
+						_, _, err := tx.Set(name, string(jsonUUIDToInsert), nil)
 						return err
 					})
 					checkErr(err)
 				case "leveldb":
 					db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
 					checkErrPanic(err)
-					err = db.Put([]byte(name), jsonValueToInsert, nil)
+					err = db.Put([]byte(name), jsonUUIDToInsert, nil)
 					checkErrPanic(err)
 					db.Close()
 			}
-			messageToSL += "Added new entry for '" + name + "' which is: " + valueToInsert.UUID + " from grid: '" + valueToInsert.Grid + "'"
+			messageToSL += "Added new entry for '" + name + "' which is: " + uuidToInsert.UUID + " from grid: '" + uuidToInsert.Grid + "'"
 		} else {
 			// we received a name: look up its UUID key and grid.
 			key, grid := searchKVname(name)
@@ -421,7 +428,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 // searchKVname searches the KV database for an avatar name.
 func searchKVname(avatarName string) (UUID string, grid string) {
-	var val = avatarUUID{ NullUUID, "" }
+	var val = avatarUUID{ avatarName, NullUUID, "" }
 	time_start := time.Now()
 	var err error // to deal with scope issues
 	switch *goslConfig.database {
@@ -482,7 +489,7 @@ func searchKVname(avatarName string) (UUID string, grid string) {
 func searchKVUUID(avatarKey string) (name string, grid string) {
 	time_start := time.Now()
 	checks := 0
-	var val = avatarUUID{ NullUUID, "" }
+	var val = avatarUUID{ "", avatarKey, "" }
 	var found string
 
 	switch *goslConfig.database {
@@ -634,7 +641,7 @@ func importDatabase(filename string) {
 				} else if err != nil {
 					log.Fatal(err)
 				}
-				jsonNewEntry, err := json.Marshal(avatarUUID{ record[0], "Production" }) // W-Hat keys come all from the main LL grid, known as 'Production'
+				jsonNewEntry, err := json.Marshal(avatarUUID{ record[0], "", "Production" }) // W-Hat keys come all from the main LL grid, known as 'Production'
 				if err != nil {
 					log.Warning(err)
 				} else {
@@ -673,7 +680,7 @@ func importDatabase(filename string) {
 				} else if err != nil {
 					log.Fatal(err)
 				}
-				jsonNewEntry, err := json.Marshal(avatarUUID{ record[0], "Production" })
+				jsonNewEntry, err := json.Marshal(avatarUUID{ record[0], "", "Production" })
 				if err != nil {
 					log.Warning(err)
 				} else {
@@ -711,7 +718,7 @@ func importDatabase(filename string) {
 				} else if err != nil {
 					log.Fatal(err)
 				}
-				jsonNewEntry, err := json.Marshal(avatarUUID{ record[0], "Production" })
+				jsonNewEntry, err := json.Marshal(avatarUUID{ record[0], "", "Production" })
 				if err != nil {
 					log.Warning(err)
 				} else {
