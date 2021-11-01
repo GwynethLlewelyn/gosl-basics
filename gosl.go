@@ -13,7 +13,7 @@ import (
 	"net/http/fcgi"
 	"os"
 	"path/filepath"
-	"regexp"
+//	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -21,6 +21,7 @@ import (
 	"github.com/dgraph-io/badger/v3"
 //	"github.com/dgraph-io/badger/options"
 //	"github.com/fsnotify/fsnotify"
+	"github.com/google/uuid"
 	"github.com/h2non/filetype"
 	"github.com/h2non/filetype/matchers"
 	"github.com/op/go-logging"
@@ -29,6 +30,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
 	"github.com/tidwall/buntdb"
+//	"gopkg.in/go-playground/validator.v9"	// to validate UUIDs... and a lot of thinks
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
@@ -43,12 +45,14 @@ var logFormat logging.Formatter
 var Opt badger.Options
 
 // AvatarUUID is the type that we store in the database; we keep a record from which grid it came from.
+// Field names need to be capitalised for JSON marshalling (it has to do with the way it works)
 // Note that we will store both UUID -> AvatarName *and* AvatarName -> UUID on the same database,
 //  thus the apparent redundancy in fields! (gwyneth 20211030)
+// The 'validate' decorator is for usage with the go-playground validator, currently unused (gwyneth 20211031)
 type avatarUUID struct {
-	AvatarName string	`json:"name" form:"name" binding:"required"`
-	UUID string			`json:"key" form:"key" binding:"required"`	// needs to be capitalised for JSON marshalling (it has to do with the way it works)
-	Grid string			`json:"grid" form:"grid"`
+	AvatarName string	`json:"name" form:"name" binding:"required" validate:"omitempty,alphanum"`
+	UUID string			`json:"key"  form:"key"  binding:"required" validate:"omitempty,uuid4_rfc4122"`
+	Grid string			`json:"grid" form:"grid" validate:"omitempty,alphanum"`
 }
 
 /*
@@ -200,7 +204,12 @@ func main() {
 	var err error
 
 	log.Infof("gosl started and logging is set up. Proceeding to test database (%s) at %q\n",*goslConfig.database, *goslConfig.myDir)
-	var testValue = avatarUUID{ testAvatarName, NullUUID, "all grids" }
+	// generate a random UUID (gwyneth2021103) (gwyneth 20211031)
+
+	var (
+		testUUID = uuid.New().String()	// Random UUID (gwyneth 20211031 — from )
+		testValue = avatarUUID{ testAvatarName, testUUID, "all grids" }
+	)
 	jsonTestValue, err := json.Marshal(testValue)
 	checkErrPanic(err) // something went VERY wrong
 
@@ -410,7 +419,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	} else if key != "" {
-		// in this scenario, we have the UUID key but no avatar name: do the equivalent of a llKey2Name (slow)
+		// in this scenario, we have the UUID key but no avatar name: do the equivalent of a llKey2Name
 		name, grid := searchKVUUID(key)
 		if compat == "false" {
 			messageToSL += "avatar name for " + key + "' is '" + name + "' on grid: '" + grid + "'"
@@ -426,6 +435,21 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	fmt.Fprint(w, messageToSL)
 }
+
+// searchKVname searches the KV database for an avatar name.
+func searchKVname(avatarName string) (uuid string, grid string) {
+	_, tempUUID, tempGrid := searchKV(avatarName)
+	return tempUUID, tempGrid
+}
+
+// searchKVname searches the KV database for an avatar name.
+func searchKVUUID(avatarKey string) (name string, grid string) {
+	tempAvatarName, _, tempGrid := searchKV(avatarKey)
+	return tempAvatarName, tempGrid
+}
+
+/* deprecated (gwyneth 20211031)
+
 // searchKVname searches the KV database for an avatar name.
 func searchKVname(avatarName string) (UUID string, grid string) {
 	var val = avatarUUID{ avatarName, NullUUID, "" }
@@ -497,12 +521,12 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 			kv, err := badger.Open(Opt)
 			checkErr(err) // should probably panic
 			itOpt := badger.DefaultIteratorOptions
-	/*
-			if !*goslConfig.noMemory {
-				itOpt.PrefetchValues = true
-				itOpt.PrefetchSize = 1000	// attempt to get this a little bit more efficient; we have many small entries, so this is not too much
-			} else {
-	*/
+	//
+	//		if !*goslConfig.noMemory {
+	//			itOpt.PrefetchValues = true
+	//			itOpt.PrefetchSize = 1000	// attempt to get this a little bit more efficient; we have many small entries, so this is not too much
+	//		} else {
+	//
 				itOpt.PrefetchValues = false // allegedly this is supposed to be WAY faster...
 	// 		}
 			txn := kv.NewTransaction(true)
@@ -577,6 +601,69 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 	log.Debugf("made %d checks for %q in %v\n", checks, avatarKey, time.Since(time_start))
 	return found, val.Grid
 }
+*/
+
+// Universal search, since we put everything in the KV database, we can basically search for anything.
+// *Way* more efficient! (gwyneth 20211031)
+func searchKV(searchItem string) (name string, uuid string, grid string) {
+	var val = avatarUUID{ "", NullUUID, "" }
+	time_start := time.Now()
+	var err error // to deal with scope issues
+	switch *goslConfig.database {
+		case "badger":
+			kv, err := badger.Open(Opt)
+			checkErrPanic(err)
+			defer kv.Close()
+			err = kv.View(func(txn *badger.Txn) error {
+				item, err := txn.Get([]byte(searchItem))
+				if err != nil {
+					return err
+				}
+				data, err := item.ValueCopy(nil)
+				if err != nil {
+					log.Errorf("error %q while getting data from %v\n", err, item)
+					return err
+				}
+				if err = json.Unmarshal(data, &val); err != nil {
+					log.Errorf("error while unparsing UUID for name: %q (%v)\n", searchItem, err)
+					return err
+				}
+				return nil
+			})
+			checkErr(err)
+		case "buntdb":
+			db, err := buntdb.Open(goslConfig.dbNamePath)
+			checkErrPanic(err)
+			defer db.Close()
+			var data string
+			err = db.View(func(tx *buntdb.Tx) error {
+				data, err = tx.Get(searchItem)
+				return err
+			})
+			err = json.Unmarshal([]byte(data), &val)
+			if err != nil {
+				log.Errorf("error while unparsing UUID for name: %q (%v)\n", searchItem, err)
+			}
+		case "leveldb":
+			db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
+			checkErrPanic(err)
+			defer db.Close()
+			data, err := db.Get([]byte(searchItem), nil)
+			if err != nil {
+				log.Errorf("error while getting UUID for name: %q (%v)\n", searchItem, err)
+			} else {
+				if err = json.Unmarshal(data, &val); err != nil {
+					log.Errorf("error while unparsing UUID for name: %q (%v)\n", searchItem, err)
+				}
+			}
+	}
+	log.Debugf("time to lookup %q: %v\n", searchItem, time.Since(time_start))
+	if err != nil {
+		checkErr(err)
+		return "", NullUUID, ""
+	} // else:
+	return val.AvatarName, val.UUID, val.Grid
+}
 
 // importDatabase is essentially reading a bzip2'ed CSV file with UUID,AvatarName downloaded from http://w-hat.com/#name2key .
 //	One could theoretically set a cron job to get this file, save it on disk periodically, and keep the database up-to-date
@@ -641,12 +728,19 @@ func importDatabase(filename string) {
 				} else if err != nil {
 					log.Fatal(err)
 				}
-				jsonNewEntry, err := json.Marshal(avatarUUID{ record[0], "", "Production" }) // W-Hat keys come all from the main LL grid, known as 'Production'
+				// CSV: first entry is avatar key UUID, second entry is avatar name.
+				// We probably should check for valid UUIDs; we may do that at some point. (gwyneth 20211031)
+				jsonNewEntry, err := json.Marshal(avatarUUID{ record[1], record[0], "Production" }) // W-Hat keys come all from the main LL grid, known as 'Production'
 				if err != nil {
 					log.Warning(err)
 				} else {
+					// Place this record under the avatar's name
 					if err = txn.Set([]byte(record[1]), jsonNewEntry); err != nil {
 					    log.Fatal(err)
+					}
+					// Now place it again, this time under the avatar's key
+					if err = txn.Set([]byte(record[0]), jsonNewEntry); err != nil {
+						log.Fatal(err)
 					}
 				}
 				if limit % goslConfig.BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
@@ -680,13 +774,18 @@ func importDatabase(filename string) {
 				} else if err != nil {
 					log.Fatal(err)
 				}
-				jsonNewEntry, err := json.Marshal(avatarUUID{ record[0], "", "Production" })
+				jsonNewEntry, err := json.Marshal(avatarUUID{ record[1], record[0], "Production" })
 				if err != nil {
 					log.Warning(err)
 				} else {
+					// see comments above for Badger. (gwyneth 20211031)
 					_, _, err = txn.Set(record[1], string(jsonNewEntry), nil)
 					if err != nil {
 					    log.Fatal(err)
+					}
+					_, _, err = txn.Set(record[0], string(jsonNewEntry), nil)
+					if err != nil {
+						log.Fatal(err)
 					}
 				}
 				if limit % goslConfig.BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
@@ -718,11 +817,13 @@ func importDatabase(filename string) {
 				} else if err != nil {
 					log.Fatal(err)
 				}
-				jsonNewEntry, err := json.Marshal(avatarUUID{ record[0], "", "Production" })
+				jsonNewEntry, err := json.Marshal(avatarUUID{ record[1], record[0], "Production" })
 				if err != nil {
 					log.Warning(err)
 				} else {
+					// see comments above for Badger. (gwyneth 20211031)
 					batch.Put([]byte(record[1]), jsonNewEntry)
+					batch.Put([]byte(record[0]), jsonNewEntry)
 				}
 				if limit % goslConfig.BATCH_BLOCK == 0 && limit != 0 {
 					log.Info("processing:", limit)
@@ -759,7 +860,7 @@ func checkErr(err error) {
 	if err != nil {
 		pc, file, line, ok := runtime.Caller(1)
 		// log.Error(filepath.Base(file), ":", line, ":", pc, ok, " - error:", err)
-		log.Errorf("%s:%d (%v) [ok: %v] - panic: %v\n", filepath.Base(file), line, pc, ok, err)
+		log.Errorf("%s:%d (%v) [ok: %v] - error: %v\n", filepath.Base(file), line, pc, ok, err)
 	}
 }
 
@@ -797,7 +898,15 @@ func funcName() string {
 
 // isValidUUID checks if the UUID is valid.
 // Thanks to Patrick D'Appollonio https://stackoverflow.com/questions/25051675/how-to-validate-uuid-v4-in-go
+//  as well as https://stackoverflow.com/a/46315070/1035977 (gwyneth 29211031)
+/*
+// Deprecated, since regexps may be overkill here; Google's own package is far more efficient and we'll use it directly (gwyneth 20211031)
 func isValidUUID(uuid string) bool {
     r := regexp.MustCompile("^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-4[a-fA-F0-9]{3}-[8|9|aA|bB][a-fA-F0-9]{3}-[a-fA-F0-9]{12}$")
     return r.MatchString(uuid)
 }
+*/
+func isValidUUID(u string) bool {
+	_, err := uuid.Parse(u)
+	return err == nil
+ }
