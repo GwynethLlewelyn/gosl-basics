@@ -1,3 +1,4 @@
+// Tools to import a avatar key & name database in CSV format into a KV database.
 package main
 
 import (

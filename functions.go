@@ -1,4 +1,5 @@
-// NOTE(gwyneth): Auxiliary functions which I'm always using...
+// Auxiliary functions which I'm always using.
+// Moved to separate file on 20211102.
 package main
 
 import (

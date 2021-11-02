@@ -1,4 +1,4 @@
-// Minimalist test to confirm that basic functionality works.
+// Minimalist test(s) to confirm that basic functionality works.
 package main
 
 import (
