@@ -3,18 +3,13 @@ package main
 
 import (
 	"bufio"
-	"compress/bzip2"
-	"compress/gzip"
-	"encoding/csv"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/fcgi"
 	"os"
 	"path/filepath"
 //	"regexp"
-	"runtime"
 	"strings"
 	"time"
 
@@ -22,13 +17,10 @@ import (
 //	"github.com/dgraph-io/badger/options"
 //	"github.com/fsnotify/fsnotify"
 	"github.com/google/uuid"
-	"github.com/h2non/filetype"
-	"github.com/h2non/filetype/matchers"
 	"github.com/op/go-logging"
 	flag "github.com/spf13/pflag"
 	"github.com/spf13/viper"
 	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/syndtr/goleveldb/leveldb/util"
 	"github.com/tidwall/buntdb"
 //	"gopkg.in/go-playground/validator.v9"	// to validate UUIDs... and a lot of thinks
 	"gopkg.in/natefinch/lumberjack.v2"
@@ -664,249 +656,3 @@ func searchKV(searchItem string) (name string, uuid string, grid string) {
 	} // else:
 	return val.AvatarName, val.UUID, val.Grid
 }
-
-// importDatabase is essentially reading a bzip2'ed CSV file with UUID,AvatarName downloaded from http://w-hat.com/#name2key .
-//	One could theoretically set a cron job to get this file, save it on disk periodically, and keep the database up-to-date
-//	see https://stackoverflow.com/questions/24673335/how-do-i-read-a-gzipped-csv-file for the actual usage of these complicated things!
-func importDatabase(filename string) {
-	filehandler, err := os.Open(filename)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer filehandler.Close()
-
-	// First, check if we _do_ have a gzipped file or not...
-	// We'll use a small library for that (gwyneth 20211027)
-
-	// We only have to pass the file header = first 261 bytes
-	head := make([]byte, 261)
-	_, err = filehandler.Read(head)
-	checkErr(err)
-
-	kind, err := filetype.Match(head)
-	checkErr(err)
-	// Now rewind the file to the start. (gwyneth 20211028)
-	position, err := filehandler.Seek(0, 0)
-	if position != 0 || err != nil {
-		log.Error("could not rewind the file to the start position")
-	}
-
-	var cr *csv.Reader	// CSV reader needs to be declared here because of scope issues. (gwyneth 20211027)
-
-	// Technically, we could match for a lot of archives and get a io.Reader for each.
-	// However, W-Hat has a limited selection of archives available (currently gzip and bzip2)
-	// so we limit ourselves to these two, falling back to plaintext (gwyneth 20211027).
-	switch kind {
-		case matchers.TypeBz2:
-			gr := bzip2.NewReader(filehandler) // open bzip2 reader
-			cr = csv.NewReader(gr)  // open csv reader and feed the bzip2 reader into it
-		case matchers.TypeGz:
-			zr, err := gzip.NewReader(filehandler) // open gzip reader
-			checkErr(err)
-			cr = csv.NewReader(zr)  // open csv reader and feed the bzip2 reader into it
-		default:
-			// We just assume that it's a CSV (uncompressed) file and open it.
-			cr = csv.NewReader(filehandler)
-	}
-
-	limit := 0	// outside of for loop so that we can count how many entries we had in total
-	time_start := time.Now() // we want to get an idea on how long this takes
-
-	switch *goslConfig.database {
-		case "badger":
-			// prepare connection to KV database
-			kv, err := badger.Open(Opt)
-			checkErrPanic(err) // should probably panic
-			defer kv.Close()
-
-			txn := kv.NewTransaction(true) // start new transaction; we will commit only every BATCH_BLOCK entries
-			defer txn.Discard()
-			for ;;limit++ {
-				record, err := cr.Read()
-				if err == io.EOF {
-					break
-				} else if err != nil {
-					log.Fatal(err)
-				}
-				// CSV: first entry is avatar key UUID, second entry is avatar name.
-				// We probably should check for valid UUIDs; we may do that at some point. (gwyneth 20211031)
-				jsonNewEntry, err := json.Marshal(avatarUUID{ record[1], record[0], "Production" }) // W-Hat keys come all from the main LL grid, known as 'Production'
-				if err != nil {
-					log.Warning(err)
-				} else {
-					// Place this record under the avatar's name
-					if err = txn.Set([]byte(record[1]), jsonNewEntry); err != nil {
-					    log.Fatal(err)
-					}
-					// Now place it again, this time under the avatar's key
-					if err = txn.Set([]byte(record[0]), jsonNewEntry); err != nil {
-						log.Fatal(err)
-					}
-				}
-				if limit % goslConfig.BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
-					log.Info("processing:", limit)
-					if err = txn.Commit(); err != nil {
-					    log.Fatal(err)
-					}
-					runtime.GC()
-					txn = kv.NewTransaction(true) // start a new transaction
-					defer txn.Discard()
-				}
-			}
-			// commit last batch
-			if err = txn.Commit(); err != nil {
-			    log.Fatal(err)
-			}
-		case "buntdb":
-			db, err := buntdb.Open(goslConfig.dbNamePath)
-			checkErrPanic(err)
-			defer db.Close()
-
-			txn, err := db.Begin(true)
-			checkErrPanic(err)
-			//defer txn.Commit()
-
-			// very similar to Badger code...
-			for ;;limit++ {
-				record, err := cr.Read()
-				if err == io.EOF {
-					break
-				} else if err != nil {
-					log.Fatal(err)
-				}
-				jsonNewEntry, err := json.Marshal(avatarUUID{ record[1], record[0], "Production" })
-				if err != nil {
-					log.Warning(err)
-				} else {
-					// see comments above for Badger. (gwyneth 20211031)
-					_, _, err = txn.Set(record[1], string(jsonNewEntry), nil)
-					if err != nil {
-					    log.Fatal(err)
-					}
-					_, _, err = txn.Set(record[0], string(jsonNewEntry), nil)
-					if err != nil {
-						log.Fatal(err)
-					}
-				}
-				if limit % goslConfig.BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
-					log.Info("processing:", limit)
-					if err = txn.Commit(); err != nil {
-					    log.Fatal(err)
-					}
-					runtime.GC()
-					txn, err = db.Begin(true)  // start a new transaction
-					checkErrPanic(err)
-					//defer txn.Commit()
-				}
-			}
-			// commit last batch
-			if err = txn.Commit(); err != nil {
-			    log.Fatal(err)
-			}
-			db.Shrink()
-		case "leveldb":
-			db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
-			checkErrPanic(err)
-			defer db.Close()
-			batch := new(leveldb.Batch)
-
-			for ;;limit++ {
-				record, err := cr.Read()
-				if err == io.EOF {
-					break
-				} else if err != nil {
-					log.Fatal(err)
-				}
-				jsonNewEntry, err := json.Marshal(avatarUUID{ record[1], record[0], "Production" })
-				if err != nil {
-					log.Warning(err)
-				} else {
-					// see comments above for Badger. (gwyneth 20211031)
-					batch.Put([]byte(record[1]), jsonNewEntry)
-					batch.Put([]byte(record[0]), jsonNewEntry)
-				}
-				if limit % goslConfig.BATCH_BLOCK == 0 && limit != 0 {
-					log.Info("processing:", limit)
-					if err = db.Write(batch, nil); err != nil {
-					    log.Fatal(err)
-					}
-					batch.Reset()	// unlike the others, we don't need to create a new batch every time
-					runtime.GC()	// it never hurts...
-				}
-			}
-			// commit last batch
-			if err = db.Write(batch, nil); err != nil {
-			    log.Fatal(err)
-			}
-			batch.Reset()	// reset it and let the garbage collector run
-			runtime.GC()
-			db.CompactRange(util.Range{Start: nil, Limit: nil})
-	}
-	log.Info("total read", limit, "records (or thereabouts) in", time.Since(time_start))
-}
-
-// NOTE(gwyneth): Auxiliary functions which I'm always using...
-
-// checkErrPanic logs a fatal error and panics.
-func checkErrPanic(err error) {
-	if err != nil {
-		pc, file, line, ok := runtime.Caller(1)
-		log.Panicf("%s:%d (%v) [ok: %v] - panic: %v\n", filepath.Base(file), line, pc, ok, err)
-	}
-}
-// checkErr checks if there is an error, and if yes, it logs it out and continues.
-//	this is for 'normal' situations when we want to get a log if something goes wrong but do not need to panic
-func checkErr(err error) {
-	if err != nil {
-		pc, file, line, ok := runtime.Caller(1)
-		// log.Error(filepath.Base(file), ":", line, ":", pc, ok, " - error:", err)
-		log.Errorf("%s:%d (%v) [ok: %v] - error: %v\n", filepath.Base(file), line, pc, ok, err)
-	}
-}
-
-// Auxiliary functions for HTTP handling
-
-// checkErrHTTP returns an error via HTTP and also logs the error.
-func checkErrHTTP(w http.ResponseWriter, httpStatus int, errorMessage string, err error) {
-	if err != nil {
-		http.Error(w, fmt.Sprintf(errorMessage, err), httpStatus)
-		pc, file, line, ok := runtime.Caller(1)
-		log.Error("(", http.StatusText(httpStatus), ") ", filepath.Base(file), ":", line, ":", pc, ok, " - error:", errorMessage, err)
-	}
-}
-// checkErrPanicHTTP returns an error via HTTP and logs the error with a panic.
-func checkErrPanicHTTP(w http.ResponseWriter, httpStatus int, errorMessage string, err error) {
-	if err != nil {
-		http.Error(w, fmt.Sprintf(errorMessage, err), httpStatus)
-		pc, file, line, ok := runtime.Caller(1)
-		log.Panic("(", http.StatusText(httpStatus), ") ", filepath.Base(file), ":", line, ":", pc, ok, " - panic:", errorMessage, err)
-	}
-}
-// logErrHTTP assumes that the error message was already composed and writes it to HTTP and logs it.
-//	this is mostly to avoid code duplication and make sure that all entries are written similarly
-func logErrHTTP(w http.ResponseWriter, httpStatus int, errorMessage string) {
-	http.Error(w, errorMessage, httpStatus)
-	log.Error("(" + http.StatusText(httpStatus) + ") " + errorMessage)
-}
-// funcName is @Sonia's solution to get the name of the function that Go is currently running.
-//	This will be extensively used to deal with figuring out where in the code the errors are!
-//	Source: https://stackoverflow.com/a/10743805/1035977 (20170708)
-func funcName() string {
-	pc, _, _, _ := runtime.Caller(1)
-	return runtime.FuncForPC(pc).Name()
-}
-
-// isValidUUID checks if the UUID is valid.
-// Thanks to Patrick D'Appollonio https://stackoverflow.com/questions/25051675/how-to-validate-uuid-v4-in-go
-//  as well as https://stackoverflow.com/a/46315070/1035977 (gwyneth 29211031)
-/*
-// Deprecated, since regexps may be overkill here; Google's own package is far more efficient and we'll use it directly (gwyneth 20211031)
-func isValidUUID(uuid string) bool {
-    r := regexp.MustCompile("^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-4[a-fA-F0-9]{3}-[8|9|aA|bB][a-fA-F0-9]{3}-[a-fA-F0-9]{12}$")
-    return r.MatchString(uuid)
-}
-*/
-func isValidUUID(u string) bool {
-	_, err := uuid.Parse(u)
-	return err == nil
- }
