@@ -1,64 +1,73 @@
 // Minimalist test to confirm that basic functionality works.
-// This can be safely ignored.
 package main
 
 import (
-	"fmt"
-	"log"
+	"os"
+	"testing"
 
 	badger "github.com/dgraph-io/badger/v3"
 )
 
-func main() {
+func TestMinimalistSLKVDB(t *testing.T) {
 	// Open the Badger database located in the /tmp/badger directory.
 	// It will be created if it doesn't exist.
 	// db, err := badger.Open(badger.DefaultOptions("/tmp/badger"))
+	t.Log("Testing basic Badger functionality with a simple database read")
 	db, err := badger.Open(badger.DefaultOptions("slkvdb/gosl-database.db"))
 	if err != nil {
-		log.Fatal(err)
+		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() {
+		db.Close()	// First close database,
+		// then remove all the directories and files
+		// Using RemoveAll() function
+		if err = os.RemoveAll("slkvdb"); err != nil {
+			t.Fatal(err)
+		} else {
+			t.Log("cleaning up test database successful")
+		}
+	}()
 
 	err = db.Update(func(txn *badger.Txn) error {
 		err = txn.Set([]byte("answer"), []byte("42"))
 		return err
 	})
-	handle(err)
+	handle(t, err)
 
 	err = db.View(func(txn *badger.Txn) error {
 		item, err := txn.Get([]byte("answer"))
-		handle(err)
+		handle(t, err)
 
 		var valCopy []byte
 		err = item.Value(func(val []byte) error {
 			// This func with val would only be called if item.Value encounters no error.
 
 			// Accessing val here is valid.
-			fmt.Printf("(Inside item.Value()) The answer is: %s\n", val)
+			t.Logf("(Inside item.Value()) The answer is: %q\n", val)
 
 			// Copying or parsing val is valid.
 			valCopy = append([]byte{}, val...)
 
 			return nil
 		})
-		handle(err)
+		handle(t, err)
 
 		// You must copy it to use it outside item.Value(...).
-		fmt.Printf("(inside db.View()) The answer is: %s\n", valCopy)
+		t.Logf("(inside db.View()) The answer is: %q\n", valCopy)
 
 		// Alternatively, you could also use item.ValueCopy().
 		valCopy, err = item.ValueCopy(nil)
-		handle(err)
-		fmt.Printf("(inside db.View() using ValueCopy) The answer is: %s\n", valCopy)
+		handle(t, err)
+		t.Logf("(inside db.View() using ValueCopy) The answer is: %s\n", valCopy)
 
 		return nil
 	})
-	handle(err)
+	handle(t, err)
 }
 
 // Handles errors for this very simple test.
-func handle(err error) {
+func handle(t *testing.T, err error) {
 	if err != nil {
-		fmt.Printf("error was: %q\n", err)
+		t.Logf("error was: %q\n", err)
 	}
 }
