@@ -88,6 +88,7 @@ func importDatabase(filename string) {
 				if err != nil {
 					log.Warning(err)
 				} else {
+					log.Debugf("Entry %04d - Name: %s UUID: %s - JSON: %s\n", limit, record[1], record[0], jsonNewEntry)
 					// Place this record under the avatar's name
 					if err = txn.Set([]byte(record[1]), jsonNewEntry); err != nil {
 						log.Fatal(err)
