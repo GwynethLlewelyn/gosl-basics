@@ -66,7 +66,7 @@ func importDatabase(filename string) {
 	limit := 0	// outside of for loop so that we can count how many entries we had in total
 	time_start := time.Now() // we want to get an idea on how long this takes
 
-	switch *goslConfig.database {
+	switch goslConfig.database {
 		case "badger":
 			// prepare connection to KV database
 			kv, err := badger.Open(Opt)

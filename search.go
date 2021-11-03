@@ -186,7 +186,7 @@ func searchKV(searchItem string) (name string, uuid string, grid string) {
 	var val = avatarUUID{ "", NullUUID, "" }
 	time_start := time.Now()
 	var err error // to deal with scope issues
-	switch *goslConfig.database {
+	switch goslConfig.database {
 		case "badger":
 			kv, err := badger.Open(Opt)
 			checkErrPanic(err)

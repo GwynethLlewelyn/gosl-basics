@@ -59,10 +59,10 @@ type avatarUUID struct {
 // Configuration options
 type goslConfigOptions struct {
 	BATCH_BLOCK int // how many entries to write to the database as a block; the bigger, the faster, but the more memory it consumes
-	noMemory, isServer, isShell *bool
-	myDir, myPort, importFilename, database *string
+	noMemory, isServer, isShell bool
+	myDir, myPort, importFilename, database string
 	dbNamePath string // for BuntDB
-	logFilename string	// for logs
+	logLevel, logFilename string	// for logs
 	maxSize, maxBackups, maxAge int // logs configuration option
 }
 
@@ -81,41 +81,43 @@ func loadConfiguration() {
 	viper.SetDefault("config.BATCH_BLOCK", 100000)	// NOTE(gwyneth): the authors of say that 100000 is way too much for Badger													// NOTE(gwyneth): let's see what happens with BuntDB
 	goslConfig.BATCH_BLOCK = viper.GetInt("config.BATCH_BLOCK")
 	viper.SetDefault("config.myPort", 3000)
-	*goslConfig.myPort = viper.GetString("config.myPort")
+	goslConfig.myPort = viper.GetString("config.myPort")
 	viper.SetDefault("config.myDir", "slkvdb")
-	*goslConfig.myDir = viper.GetString("config.myDir")
+	goslConfig.myDir = viper.GetString("config.myDir")
 	viper.SetDefault("config.isServer", false)
-	*goslConfig.isServer = viper.GetBool("config.isServer")
+	goslConfig.isServer = viper.GetBool("config.isServer")
 	viper.SetDefault("config.isShell", false)
-	*goslConfig.isShell = viper.GetBool("config.isShell")
+	goslConfig.isShell = viper.GetBool("config.isShell")
 	viper.SetDefault("config.database", "badger") // currently, badger, boltdb, leveldb
-	*goslConfig.database = viper.GetString("config.database")
-	viper.SetDefault("config.importFilename", "") // must be empty by default
-	*goslConfig.importFilename = viper.GetString("config.importFilename")
-	viper.SetDefault("config.noMemory", false)
-	*goslConfig.noMemory = viper.GetBool("config.noMemory")
+	goslConfig.database = viper.GetString("config.database")
+	viper.SetDefault("options.importFilename", "") // must be empty by default
+	goslConfig.importFilename = viper.GetString("options.importFilename")
+	viper.SetDefault("options.noMemory", false)
+	goslConfig.noMemory = viper.GetBool("options.noMemory")
 	// Logging options
-	viper.SetDefault("config.logFilename", "gosl.log")
-	goslConfig.logFilename = viper.GetString("config.logFilename")
-	viper.SetDefault("config.maxSize", 10)
-	goslConfig.maxSize = viper.GetInt("config.maxSize")
-	viper.SetDefault("config.maxBackups", 3)
-	goslConfig.maxBackups = viper.GetInt("config.maxBackups")
-	viper.SetDefault("config.maxAge", 28)
-	goslConfig.maxAge = viper.GetInt("config.maxAge")
+	viper.SetDefault("log.Filename", "gosl.log")
+	goslConfig.logFilename = viper.GetString("log.Filename")
+	viper.SetDefault("log.logLevel", "ERROR")
+	goslConfig.logLevel = viper.GetString("log.logLevel")
+	viper.SetDefault("log.MaxSize", 10)
+	goslConfig.maxSize = viper.GetInt("log.MaxSize")
+	viper.SetDefault("log.MaxBackups", 3)
+	goslConfig.maxBackups = viper.GetInt("log.MaxBackups")
+	viper.SetDefault("log.MaxAge", 28)
+	goslConfig.maxAge = viper.GetInt("log.MaxAge")
 }
 
 // main() starts here.
 func main() {
 	// Flag setup; can be overridden by config file.
 	// TODO(gwyneth): I need to fix this to be the oher way round).
-	goslConfig.myPort			= flag.String("port", "3000", "Server port")
-	goslConfig.myDir			= flag.String("dir", "slkvdb", "Directory where database files are stored")
-	goslConfig.isServer			= flag.Bool("server", false, "Run as server on port " + *goslConfig.myPort)
-	goslConfig.isShell			= flag.Bool("shell", false, "Run as an interactive shell")
-	goslConfig.importFilename	= flag.String("import", "name2key.csv.bz2", "Import database from W-Hat (use the csv.bz2 version)")
-	goslConfig.database 		= flag.String("database", "badger", "Database type (badger, buntdb, leveldb)")
-	goslConfig.noMemory 		= flag.Bool("nomemory", false, "Attempt to use only disk to save memory on Badger (important for shared webservers)")
+	goslConfig.myPort			= *flag.String("port", "3000", "Server port")
+	goslConfig.myDir			= *flag.String("dir", "slkvdb", "Directory where database files are stored")
+	goslConfig.isServer			= *flag.Bool("server", false, "Run as server on port " + goslConfig.myPort)
+	goslConfig.isShell			= *flag.Bool("shell", false, "Run as an interactive shell")
+	goslConfig.importFilename	= *flag.String("import", "name2key.csv.bz2", "Import database from W-Hat (use the csv.bz2 version)")
+	goslConfig.database 		= *flag.String("database", "badger", "Database type (badger, buntdb, leveldb)")
+	goslConfig.noMemory 		= *flag.Bool("nomemory", false, "Attempt to use only disk to save memory on Badger (important for shared webservers)")
 
 	// Config viper, which reads in the configuration file every time it's needed.
 	// Note that we need some hard-coded variables for the path and config file name.
@@ -133,14 +135,14 @@ func main() {
 	// TODO(gwyneth): There is something broken with this, no reason why... (gwyneth 20211026)
 	// viper.WatchConfig()
 	// viper.OnConfigChange(func(e fsnotify.Event) {
-	// 	if *goslConfig.isServer || *goslConfig.isShell {
+	// 	if goslConfig.isServer || goslConfig.isShell {
 	// 		fmt.Println("Config file changed:", e.Name)	// BUG(gwyneth): FastCGI cannot write to output
 	// 	}
 	// 	loadConfiguration()
 	// })
 
 	// NOTE(gwyneth): We cannot write to stdout if we're running as FastCGI, only to logs!
-	if *goslConfig.isServer || *goslConfig.isShell {
+	if goslConfig.isServer || goslConfig.isShell {
 		fmt.Println("gosl is starting...")
 	}
 
@@ -161,11 +163,23 @@ func main() {
 	backendFileLeveled 		:= logging.AddModuleLevel(backendFileFormatter)
 	backendFileLeveled.SetLevel(logging.INFO, "gosl")	// we just send debug data to logs if we run as shell
 
-	if *goslConfig.isServer || *goslConfig.isShell {
+	if goslConfig.isServer || goslConfig.isShell {
 		backendStderr			:= logging.NewLogBackend(os.Stderr, "", 0)
 		backendStderrFormatter	:= logging.NewBackendFormatter(backendStderr, logFormat)
 		backendStderrLeveled 	:= logging.AddModuleLevel(backendStderrFormatter)
-		if *goslConfig.isShell {
+
+		theLogLevel, err := logging.LogLevel(goslConfig.logLevel)
+		if err != nil {
+			fmt.Printf("could not set log level to %q — invalid?\nlogging.LogLevel() returned error %q\n", goslConfig.logLevel, err)
+		} else {
+			fmt.Printf("log level: %q \n", theLogLevel.String())
+		}
+
+		backendStderrLeveled.SetLevel(theLogLevel, "gosl")
+	}
+/*
+		// deprecated, now we set it explicitly if desired
+		if goslConfig.isShell {
 			backendStderrLeveled.SetLevel(logging.DEBUG, "gosl")	// shell is meant to be for debugging mostly
 		} else {
 			backendStderrLeveled.SetLevel(logging.INFO, "gosl")
@@ -174,28 +188,29 @@ func main() {
 	} else {
 		logging.SetBackend(backendFileLeveled)	// FastCGI only logs to file
 	}
+*/
 
 	// Check if this directory actually exists; if not, create it. Panic if something wrong happens (we cannot proceed without a valid directory for the database to be written)
-	if stat, err := os.Stat(*goslConfig.myDir); err == nil && stat.IsDir() {
+	if stat, err := os.Stat(goslConfig.myDir); err == nil && stat.IsDir() {
 		// path is a valid directory
-		log.Infof("valid directory: %q\n", *goslConfig.myDir)
+		log.Infof("valid directory: %q\n", goslConfig.myDir)
 	} else {
 		// try to create directory
-		if err = os.Mkdir(*goslConfig.myDir, 0700); err != nil {
+		if err = os.Mkdir(goslConfig.myDir, 0700); err != nil {
 			if err != os.ErrExist {
 				checkErr(err)
 			} else {
-				log.Debugf("directory %q exists, no need to create it\n", *goslConfig.myDir)
+				log.Debugf("directory %q exists, no need to create it\n", goslConfig.myDir)
 			}
 		}
-		log.Debugf("created new directory: %q\n", *goslConfig.myDir)
+		log.Debugf("created new directory: %q\n", goslConfig.myDir)
 	}
 
 	// Prepare testing data! (common to all types)
 	const testAvatarName = "Nobody Here"
 	var err error
 
-	log.Infof("gosl started and logging is set up. Proceeding to test database (%s) at %q\n",*goslConfig.database, *goslConfig.myDir)
+	log.Infof("gosl started and logging is set up. Proceeding to test database (%s) at %q\n",goslConfig.database, goslConfig.myDir)
 	// generate a random UUID (gwyneth2021103) (gwyneth 20211031)
 
 	var (
@@ -207,13 +222,13 @@ func main() {
 
 	// KVDB Initialisation & Tests
 	// Each case is different
-	switch *goslConfig.database {
+	switch goslConfig.database {
 		case "badger":
 			// Badger v3 - fully rewritten configuration (much simpler!!) (gwyneth 20211026)
-			if *goslConfig.noMemory  {
+			if goslConfig.noMemory  {
 				// use disk; note that unlike the others, Badger generates its own filenames,
 				// we can only pass a _directory_... (gwyneth 20211027)
-				goslConfig.dbNamePath = filepath.Join(*goslConfig.myDir, databaseName)
+				goslConfig.dbNamePath = filepath.Join(goslConfig.myDir, databaseName)
 				// try to create directory
 				if err = os.Mkdir(goslConfig.dbNamePath, 0700); err != nil {
 					if err != os.ErrExist {
@@ -250,11 +265,7 @@ func main() {
 			log.Debugf("badger SET %+v (json: %v)\n", testValue, string(jsonTestValue))
 			kv.Close()
 		case "buntdb":
-			/* NOTE(gwyneth): this fails because pointers to strings do not implement len(). Duh!
-			if *goslConfig.myDir[len(*goslConfig.myDir)-1] != os.PathSeparator {
-				*goslConfig.myDir = append(*goslConfig.myDir + os.PathSeparator
-			} */
-			goslConfig.dbNamePath = filepath.Join(*goslConfig.myDir, databaseName)
+			goslConfig.dbNamePath = filepath.Join(goslConfig.myDir, databaseName)
 			db, err := buntdb.Open(goslConfig.dbNamePath)
 			checkErrPanic(err)
 			err = db.Update(func(tx *buntdb.Tx) error {
@@ -265,7 +276,7 @@ func main() {
 			log.Debugf("buntdb SET %+v (json: %v)\n", testValue, string(jsonTestValue))
 			db.Close()
 		case "leveldb":
-			goslConfig.dbNamePath = filepath.Join(*goslConfig.myDir, databaseName)
+			goslConfig.dbNamePath = filepath.Join(goslConfig.myDir, databaseName)
 			db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
 			checkErrPanic(err)
 			err = db.Put([]byte(testAvatarName), jsonTestValue, nil)
@@ -278,16 +289,16 @@ func main() {
 	log.Debugf("GET %q returned %q [grid %q]\n", testAvatarName, key, grid)
 	log.Info("KV database seems fine.")
 
-	if *goslConfig.importFilename != "" {
-		log.Info("attempting to import", *goslConfig.importFilename, "...")
-		importDatabase(*goslConfig.importFilename)
+	if goslConfig.importFilename != "" {
+		log.Info("attempting to import", goslConfig.importFilename, "...")
+		importDatabase(goslConfig.importFilename)
 		log.Info("database finished import.")
 	} else {
 		// it's not an error if there is no nam2key database available for import (gwyneth 20211027)
 		log.Warning("no database configured for import")
 	}
 
-	if *goslConfig.isShell {
+	if goslConfig.isShell {
 		log.Info("starting to run as interactive shell")
 		reader := bufio.NewReader(os.Stdin)
 		fmt.Println("Ctrl-C to quit.")
@@ -319,11 +330,11 @@ func main() {
 	// set up routing.
 	// NOTE(gwyneth): one function only because FastCGI seems to have problems with multiple handlers.
 	http.HandleFunc("/", handler)
-	log.Info("directory for database:", *goslConfig.myDir)
+	log.Info("directory for database:", goslConfig.myDir)
 
-	if (*goslConfig.isServer) {
-		log.Info("starting to run as web server on port :" + *goslConfig.myPort)
-		err := http.ListenAndServe(":" + *goslConfig.myPort, nil) // set listen port
+	if (goslConfig.isServer) {
+		log.Info("starting to run as web server on port :" + goslConfig.myPort)
+		err := http.ListenAndServe(":" + goslConfig.myPort, nil) // set listen port
 		checkErrPanic(err) // if it can't listen to all the above, then it has to abort anyway
 	} else {
 		// default is to run as FastCGI!
@@ -335,7 +346,7 @@ func main() {
 	}
 	// we should never have reached this point!
 	log.Error("unknown usage — this application may run as a standalone server, as a FastCGI application, or as an interactive shell")
-	if *goslConfig.isServer || *goslConfig.isShell {
+	if goslConfig.isServer || goslConfig.isShell {
 		flag.PrintDefaults()
 	}
 }
@@ -373,7 +384,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			uuidToInsert.Grid = r.Header.Get("X-Secondlife-Shard")
 			jsonUUIDToInsert, err := json.Marshal(uuidToInsert)
 			checkErr(err)
-			switch *goslConfig.database {
+			switch goslConfig.database {
 				case "badger":
 					kv, err := badger.Open(Opt)
 					checkErrPanic(err) // should probably panic
