@@ -188,7 +188,7 @@ func searchKV(searchItem string) (name string, uuid string, grid string) {
 	var err error // to deal with scope issues
 	switch goslConfig.database {
 		case "badger":
-			kv, err := badger.Open(Opt)
+			kv, err = badger.Open(Opt)
 			checkErrPanic(err)
 			defer kv.Close()
 			err = kv.View(func(txn *badger.Txn) error {
@@ -207,7 +207,6 @@ func searchKV(searchItem string) (name string, uuid string, grid string) {
 				}
 				return nil
 			})
-			checkErr(err)
 		case "buntdb":
 			db, err := buntdb.Open(goslConfig.dbNamePath)
 			checkErrPanic(err)

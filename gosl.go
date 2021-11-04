@@ -115,9 +115,9 @@ func main() {
 	goslConfig.myDir			= *flag.String("dir", "slkvdb", "Directory where database files are stored")
 	goslConfig.isServer			= *flag.Bool("server", false, "Run as server on port " + goslConfig.myPort)
 	goslConfig.isShell			= *flag.Bool("shell", false, "Run as an interactive shell")
-	goslConfig.importFilename	= *flag.String("import", "name2key.csv.bz2", "Import database from W-Hat (use the csv.bz2 version)")
+	goslConfig.importFilename	= *flag.String("import", "", "Import database from W-Hat (use the csv.bz2 versions)")
 	goslConfig.database 		= *flag.String("database", "badger", "Database type (badger, buntdb, leveldb)")
-	goslConfig.noMemory 		= *flag.Bool("nomemory", false, "Attempt to use only disk to save memory on Badger (important for shared webservers)")
+	goslConfig.noMemory 		= *flag.Bool("nomemory", true, "Attempt to use only disk to save memory on Badger (important for shared webservers)")
 
 	// Config viper, which reads in the configuration file every time it's needed.
 	// Note that we need some hard-coded variables for the path and config file name.
@@ -172,10 +172,11 @@ func main() {
 		if err != nil {
 			fmt.Printf("could not set log level to %q — invalid?\nlogging.LogLevel() returned error %q\n", goslConfig.logLevel, err)
 		} else {
-			fmt.Printf("log level: %q \n", theLogLevel.String())
+			fmt.Printf("requested log level: %q \n", theLogLevel.String())
 		}
 
 		backendStderrLeveled.SetLevel(theLogLevel, "gosl")
+		log.Debugf("level set to: %v\n", backendStderrLeveled.GetLevel("gosl"))
 	}
 /*
 		// deprecated, now we set it explicitly if desired
@@ -245,13 +246,14 @@ func main() {
 			} else {
 				// Use only memory
 				Opt = badger.LSMOnlyOptions("").WithInMemory(true)
-				Opt.LevelSizeMultiplier = 1
-				Opt.NumMemtables = 1
+				Opt.WithLevelSizeMultiplier(1)
+				Opt.WithNumMemtables(1)
+				Opt.WithValueDir(Opt.Dir)	// probably not needed
 				log.Debugf("entering memory-only mode, Opt is %+v\n", Opt)
 			}
 			// common config
-			Opt.ValueDir = Opt.Dir	// probably not needed
-			Opt.Logger = log	// set the internal logger to our own rotating logger
+			Opt.WithLogger(log)	// set the internal logger to our own rotating logger
+			Opt.WithLoggingLevel(badger.ERROR)
 			goslConfig.BATCH_BLOCK = 1000	// try to import less at each time, it will take longer but hopefully work
 			log.Info("trying to avoid too much memory consumption")
 			// Badger setup is ready, now the rest is similar to the others
@@ -259,6 +261,8 @@ func main() {
 			checkErrPanic(err) // should probably panic, cannot prep new database
 			txn := kv.NewTransaction(true)
 			err = txn.Set([]byte(testAvatarName), jsonTestValue)
+			checkErrPanic(err)
+			err = txn.Set([]byte(testUUID), jsonTestValue)
 			checkErrPanic(err)
 			err = txn.Commit()
 			checkErrPanic(err)
