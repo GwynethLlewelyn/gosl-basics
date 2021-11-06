@@ -2,7 +2,7 @@
 package main
 
 import (
-	"bufio"
+//	"bufio"			// replaced by the more sophisticated readline (gwyneth 20211106)
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -22,6 +22,7 @@ import (
 	"github.com/spf13/viper"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/tidwall/buntdb"
+	"gitlab.com/cznic/readline"
 //	"gopkg.in/go-playground/validator.v9"	// to validate UUIDs... and a lot of thinks
 	"gopkg.in/natefinch/lumberjack.v2"
 )
@@ -146,6 +147,9 @@ func main() {
 		fmt.Println("gosl is starting...")
 	}
 
+	// This is mostly to deal with scoping issues below. (gwyneth 20211106)
+	var err error
+
 	// Setup the lumberjack rotating logger. This is because we need it for the go-logging logger when writing to files. (20170813)
 	rotatingLogger := &lumberjack.Logger{
 		Filename:	goslConfig.logFilename,
@@ -161,22 +165,23 @@ func main() {
 	backendFile				:= logging.NewLogBackend(rotatingLogger, "", 0)
 	backendFileFormatter	:= logging.NewBackendFormatter(backendFile, logFormat)
 	backendFileLeveled 		:= logging.AddModuleLevel(backendFileFormatter)
-	backendFileLeveled.SetLevel(logging.INFO, "gosl")	// we just send debug data to logs if we run as shell
+
+	theLogLevel, err := logging.LogLevel(goslConfig.logLevel)
+	if err != nil {
+		log.Warningf("could not set log level to %q — invalid?\nlogging.LogLevel() returned error %q\n", goslConfig.logLevel, err)
+	} else {
+		log.Debugf("requested file log level: %q\n", theLogLevel.String())
+		log.Debugf("file log level set to: %v\n", backendFileLeveled.GetLevel("gosl"))
+	}
+
+	backendFileLeveled.SetLevel(theLogLevel, "gosl")	// we just send debug data to logs if we run as shell
 
 	if goslConfig.isServer || goslConfig.isShell {
 		backendStderr			:= logging.NewLogBackend(os.Stderr, "", 0)
 		backendStderrFormatter	:= logging.NewBackendFormatter(backendStderr, logFormat)
 		backendStderrLeveled 	:= logging.AddModuleLevel(backendStderrFormatter)
-
-		theLogLevel, err := logging.LogLevel(goslConfig.logLevel)
-		if err != nil {
-			fmt.Printf("could not set log level to %q — invalid?\nlogging.LogLevel() returned error %q\n", goslConfig.logLevel, err)
-		} else {
-			fmt.Printf("requested log level: %q \n", theLogLevel.String())
-		}
-
 		backendStderrLeveled.SetLevel(theLogLevel, "gosl")
-		log.Debugf("level set to: %v\n", backendStderrLeveled.GetLevel("gosl"))
+		log.Debugf("stderr log level set to: %v\n", backendStderrLeveled.GetLevel("gosl"))
 	}
 /*
 		// deprecated, now we set it explicitly if desired
@@ -194,7 +199,7 @@ func main() {
 	// Check if this directory actually exists; if not, create it. Panic if something wrong happens (we cannot proceed without a valid directory for the database to be written)
 	if stat, err := os.Stat(goslConfig.myDir); err == nil && stat.IsDir() {
 		// path is a valid directory
-		log.Infof("valid directory: %q\n", goslConfig.myDir)
+		log.Debugf("valid directory: %q\n", goslConfig.myDir)
 	} else {
 		// try to create directory
 		if err = os.Mkdir(goslConfig.myDir, 0700); err != nil {
@@ -207,22 +212,9 @@ func main() {
 		log.Debugf("created new directory: %q\n", goslConfig.myDir)
 	}
 
-	// Prepare testing data! (common to all types)
-	const testAvatarName = "Nobody Here"
-	var err error
-
-	log.Infof("gosl started and logging is set up. Proceeding to test database (%s) at %q\n",goslConfig.database, goslConfig.myDir)
-	// generate a random UUID (gwyneth2021103) (gwyneth 20211031)
-
-	var (
-		testUUID = uuid.New().String()	// Random UUID (gwyneth 20211031 — from )
-		testValue = avatarUUID{ testAvatarName, testUUID, "all grids" }
-	)
-	jsonTestValue, err := json.Marshal(testValue)
-	checkErrPanic(err) // something went VERY wrong
-
-	// KVDB Initialisation & Tests
-	// Each case is different
+	// Special options configuration.
+	// Currently, this is only needed for Badger v3, the others have much simpler configurations.
+	// (gwyneth 20211106)
 	switch goslConfig.database {
 		case "badger":
 			// Badger v3 - fully rewritten configuration (much simpler!!) (gwyneth 20211026)
@@ -256,63 +248,104 @@ func main() {
 			Opt.WithLoggingLevel(badger.ERROR)
 			goslConfig.BATCH_BLOCK = 1000	// try to import less at each time, it will take longer but hopefully work
 			log.Info("trying to avoid too much memory consumption")
-			// Badger setup is ready, now the rest is similar to the others
-			kv, err := badger.Open(Opt)
-			checkErrPanic(err) // should probably panic, cannot prep new database
-			txn := kv.NewTransaction(true)
-			err = txn.Set([]byte(testAvatarName), jsonTestValue)
-			checkErrPanic(err)
-			err = txn.Set([]byte(testUUID), jsonTestValue)
-			checkErrPanic(err)
-			err = txn.Commit()
-			checkErrPanic(err)
-			log.Debugf("badger SET %+v (json: %v)\n", testValue, string(jsonTestValue))
-			kv.Close()
-		case "buntdb":
-			goslConfig.dbNamePath = filepath.Join(goslConfig.myDir, databaseName)
-			db, err := buntdb.Open(goslConfig.dbNamePath)
-			checkErrPanic(err)
-			err = db.Update(func(tx *buntdb.Tx) error {
-				_, _, err := tx.Set(testAvatarName, string(jsonTestValue), nil)
-				return err
-			})
-			checkErr(err)
-			log.Debugf("buntdb SET %+v (json: %v)\n", testValue, string(jsonTestValue))
-			db.Close()
-		case "leveldb":
-			goslConfig.dbNamePath = filepath.Join(goslConfig.myDir, databaseName)
-			db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
-			checkErrPanic(err)
-			err = db.Put([]byte(testAvatarName), jsonTestValue, nil)
-			checkErrPanic(err)
-			log.Debugf("leveldb SET %+v (json: %v)\n", testValue, string(jsonTestValue))
-			db.Close()
+		// the other databases do not require any special configuration (for now)
 	} // /switch
-	// common to all databases:
-	key, grid := searchKVname(testAvatarName)
-	log.Debugf("GET %q returned %q [grid %q]\n", testAvatarName, key, grid)
-	log.Info("KV database seems fine.")
 
+	// if importFilename isn't empty, this means we
 	if goslConfig.importFilename != "" {
 		log.Info("attempting to import", goslConfig.importFilename, "...")
 		importDatabase(goslConfig.importFilename)
 		log.Info("database finished import.")
 	} else {
-		// it's not an error if there is no nam2key database available for import (gwyneth 20211027)
-		log.Warning("no database configured for import")
+		// it's not an error if there is no name2key database available for import (gwyneth 20211027)
+		log.Debug("no database configured for import")
+	}
+
+	// Prepare testing data! (common to all database types)
+	// Note: this only works for shell/server; for FastCGI it's definitely overkill (gwyneth 20211106),
+	//  so we do it only for server/shell mode.
+	if goslConfig.isServer || goslConfig.isShell {
+		const testAvatarName = "Nobody Here"
+
+		log.Infof("gosl started and logging is set up. Proceeding to test database (%s) at %q\n",goslConfig.database, goslConfig.myDir)
+		// generate a random UUID (gwyneth2021103) (gwyneth 20211031)
+
+		var (
+			testUUID = uuid.New().String()	// Random UUID (gwyneth 20211031 — from )
+			testValue = avatarUUID{ testAvatarName, testUUID, "all grids" }
+		)
+		jsonTestValue, err := json.Marshal(testValue)
+		checkErrPanic(err) // something went VERY wrong
+
+		// KVDB Initialisation & Tests
+		// Each case is different
+		switch goslConfig.database {
+			case "badger":
+				// Opt has already been set earlier. (gwyneth 20211106)
+				kv, err := badger.Open(Opt)
+				checkErrPanic(err) // should probably panic, cannot prep new database
+				txn := kv.NewTransaction(true)
+				err = txn.Set([]byte(testAvatarName), jsonTestValue)
+				checkErrPanic(err)
+				err = txn.Set([]byte(testUUID), jsonTestValue)
+				checkErrPanic(err)
+				err = txn.Commit()
+				checkErrPanic(err)
+				log.Debugf("badger SET %+v (json: %v)\n", testValue, string(jsonTestValue))
+				kv.Close()
+			case "buntdb":
+				goslConfig.dbNamePath = filepath.Join(goslConfig.myDir, databaseName)
+				db, err := buntdb.Open(goslConfig.dbNamePath)
+				checkErrPanic(err)
+				err = db.Update(func(tx *buntdb.Tx) error {
+					_, _, err := tx.Set(testAvatarName, string(jsonTestValue), nil)
+					return err
+				})
+				checkErr(err)
+				log.Debugf("buntdb SET %+v (json: %v)\n", testValue, string(jsonTestValue))
+				db.Close()
+			case "leveldb":
+				goslConfig.dbNamePath = filepath.Join(goslConfig.myDir, databaseName)
+				db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
+				checkErrPanic(err)
+				err = db.Put([]byte(testAvatarName), jsonTestValue, nil)
+				checkErrPanic(err)
+				log.Debugf("leveldb SET %+v (json: %v)\n", testValue, string(jsonTestValue))
+				db.Close()
+		} // /switch
+		// common to all databases:
+		key, grid := searchKVname(testAvatarName)
+		log.Debugf("GET %q returned %q [grid %q]\n", testAvatarName, key, grid)
+		log.Info("KV database seems fine.")
+
+		if goslConfig.importFilename != "" {
+			log.Info("attempting to import", goslConfig.importFilename, "...")
+			importDatabase(goslConfig.importFilename)
+			log.Info("database finished import.")
+		} else {
+			// it's not an error if there is no name2key database available for import (gwyneth 20211027)
+			log.Debug("no database configured for import")
+		}
 	}
 
 	if goslConfig.isShell {
 		log.Info("starting to run as interactive shell")
-		reader := bufio.NewReader(os.Stdin)
 		fmt.Println("Ctrl-C to quit.")
 		var err error	// to avoid assigning text in a different scope (this is a bit awkward, but that's the problem with bi-assignment)
-		var checkInput, avatarName, avatarKey, gridName string
+		var avatarName, avatarKey, gridName string
+
+		rl, err := readline.New("> ")
+		if err != nil {
+			panic(err)
+		}
+		defer rl.Close()
+
 		for {
-			// Prompt and read
 			fmt.Print("enter avatar name or UUID: ")
-			checkInput, err = reader.ReadString('\n')
-			checkErr(err)
+			checkInput, err := rl.Readline()
+			if err != nil || checkInput == "quit" { // io.EOF
+				break
+			}
 			checkInput = strings.TrimRight(checkInput, "\r\n")
 			// fmt.Printf("Ok, got %s length is %d and UUID is %v\n", checkInput, len(checkInput), isValidUUID(checkInput))
 			if (len(checkInput) == 36) && isValidUUID(checkInput) {
@@ -336,7 +369,7 @@ func main() {
 	http.HandleFunc("/", handler)
 	log.Info("directory for database:", goslConfig.myDir)
 
-	if (goslConfig.isServer) {
+	if goslConfig.isServer {
 		log.Info("starting to run as web server on port :" + goslConfig.myPort)
 		err := http.ListenAndServe(":" + goslConfig.myPort, nil) // set listen port
 		checkErrPanic(err) // if it can't listen to all the above, then it has to abort anyway

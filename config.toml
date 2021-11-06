@@ -1,6 +1,6 @@
 [config]
 BATCH_BLOCK	= 100000
-myPort		= 3000
+# myPort		=
 myDir		= "slkvdb"
 isServer	= false
 isShell		= true

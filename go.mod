@@ -2,6 +2,8 @@ module git.gwynethllewelyn.net/GwynethLlewelyn/gosl-basics
 
 go 1.17
 
+replace gitlab.com/cznic/readline => modernc.org/readline v1.0.0
+
 require (
 	github.com/dgraph-io/badger v1.6.2
 	github.com/dgraph-io/badger/v3 v3.2103.2
@@ -12,6 +14,7 @@ require (
 	github.com/spf13/viper v1.9.0
 	github.com/syndtr/goleveldb v1.0.0
 	github.com/tidwall/buntdb v1.2.7
+	gitlab.com/cznic/readline v1.0.0
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )
 
