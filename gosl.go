@@ -336,7 +336,7 @@ func main() {
 
 		rl, err := readline.New("enter avatar name or UUID: ")
 		if err != nil {
-			panic(err)
+			log.Criticalf("major readline issue preventing normal functioning; error was %q\n", err)
 		}
 		defer rl.Close()
 
