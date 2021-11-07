@@ -376,7 +376,7 @@ func main() {
 			// default is to run as FastCGI!
 			// works like a charm thanks to http://www.dav-muz.net/blog/2013/09/how-to-use-go-and-fastcgi/
 			log.Debug("http.DefaultServeMux is", http.DefaultServeMux)
-			if err := fcgi.Serve(nil, nil); err != nil {
+			if err := fcgi.Serve(nil, http.HandlerFunc(handler)); err != nil {
 				checkErrPanic(err)
 			}
 		}
