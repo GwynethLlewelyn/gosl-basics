@@ -171,15 +171,15 @@ func main() {
 		log.Warningf("could not set log level to %q — invalid?\nlogging.LogLevel() returned error %q\n", goslConfig.logLevel, err)
 	} else {
 		log.Debugf("requested file log level: %q\n", theLogLevel.String())
+		backendFileLeveled.SetLevel(theLogLevel, "gosl")	// we just send debug data to logs if we run asshell
 		log.Debugf("file log level set to: %v\n", backendFileLeveled.GetLevel("gosl"))
 	}
-
-	backendFileLeveled.SetLevel(theLogLevel, "gosl")	// we just send debug data to logs if we run as shell
 
 	if goslConfig.isServer || goslConfig.isShell {
 		backendStderr			:= logging.NewLogBackend(os.Stderr, "", 0)
 		backendStderrFormatter	:= logging.NewBackendFormatter(backendStderr, logFormat)
 		backendStderrLeveled 	:= logging.AddModuleLevel(backendStderrFormatter)
+		log.Debugf("requested stderr log level: %q\n", theLogLevel.String())
 		backendStderrLeveled.SetLevel(theLogLevel, "gosl")
 		log.Debugf("stderr log level set to: %v\n", backendStderrLeveled.GetLevel("gosl"))
 	}
@@ -330,18 +330,17 @@ func main() {
 
 	if goslConfig.isShell {
 		log.Info("starting to run as interactive shell")
-		fmt.Println("Ctrl-C to quit.")
+		fmt.Println("Ctrl-C to quit, or just type \"quit\".")
 		var err error	// to avoid assigning text in a different scope (this is a bit awkward, but that's the problem with bi-assignment)
 		var avatarName, avatarKey, gridName string
 
-		rl, err := readline.New("> ")
+		rl, err := readline.New("enter avatar name or UUID: ")
 		if err != nil {
 			panic(err)
 		}
 		defer rl.Close()
 
 		for {
-			fmt.Print("enter avatar name or UUID: ")
 			checkInput, err := rl.Readline()
 			if err != nil || checkInput == "quit" { // io.EOF
 				break
@@ -361,30 +360,31 @@ func main() {
 				fmt.Println("sorry, unknown input", checkInput)
 			}
 		}
-		// never leaves until Ctrl-C
-	}
-
-	// set up routing.
-	// NOTE(gwyneth): one function only because FastCGI seems to have problems with multiple handlers.
-	http.HandleFunc("/", handler)
-	log.Info("directory for database:", goslConfig.myDir)
-
-	if goslConfig.isServer {
-		log.Info("starting to run as web server on port :" + goslConfig.myPort)
-		err := http.ListenAndServe(":" + goslConfig.myPort, nil) // set listen port
-		checkErrPanic(err) // if it can't listen to all the above, then it has to abort anyway
+		// never leaves until Ctrl-C or by typing `quit`. (gwyneth 20211106)
+		log.Debug("interactive session finished.")
 	} else {
-		// default is to run as FastCGI!
-		// works like a charm thanks to http://www.dav-muz.net/blog/2013/09/how-to-use-go-and-fastcgi/
-		log.Debug("http.DefaultServeMux is", http.DefaultServeMux)
-		if err := fcgi.Serve(nil, nil); err != nil {
-			checkErrPanic(err)
+		// set up routing.
+		// NOTE(gwyneth): one function only because FastCGI seems to have problems with multiple handlers.
+		http.HandleFunc("/", handler)
+		log.Debug("directory for database:", goslConfig.myDir)
+
+		if goslConfig.isServer {
+			log.Info("starting to run as web server on port :" + goslConfig.myPort)
+			err := http.ListenAndServe(":" + goslConfig.myPort, nil) // set listen port
+			checkErrPanic(err) // if it can't listen to all the above, then it has to abort anyway
+		} else {
+			// default is to run as FastCGI!
+			// works like a charm thanks to http://www.dav-muz.net/blog/2013/09/how-to-use-go-and-fastcgi/
+			log.Debug("http.DefaultServeMux is", http.DefaultServeMux)
+			if err := fcgi.Serve(nil, nil); err != nil {
+				checkErrPanic(err)
+			}
 		}
-	}
-	// we should never have reached this point!
-	log.Error("unknown usage — this application may run as a standalone server, as a FastCGI application, or as an interactive shell")
-	if goslConfig.isServer || goslConfig.isShell {
-		flag.PrintDefaults()
+		// we should never have reached this point!
+		log.Error("unknown usage — this application may run as a standalone server, as a FastCGI application, or as an interactive shell")
+		if goslConfig.isServer || goslConfig.isShell {
+			flag.PrintDefaults()
+		}
 	}
 }
 
