@@ -251,7 +251,7 @@ func main() {
 		// the other databases do not require any special configuration (for now)
 	} // /switch
 
-	// if importFilename isn't empty, this means we
+	// if importFilename isn't empty, this means we potentially have something to import.
 	if goslConfig.importFilename != "" {
 		log.Info("attempting to import", goslConfig.importFilename, "...")
 		importDatabase(goslConfig.importFilename)
@@ -362,29 +362,30 @@ func main() {
 		}
 		// never leaves until Ctrl-C or by typing `quit`. (gwyneth 20211106)
 		log.Debug("interactive session finished.")
-	} else {
+	} else if goslConfig.isServer {
 		// set up routing.
 		// NOTE(gwyneth): one function only because FastCGI seems to have problems with multiple handlers.
 		http.HandleFunc("/", handler)
 		log.Debug("directory for database:", goslConfig.myDir)
 
-		if goslConfig.isServer {
-			log.Info("starting to run as web server on port :" + goslConfig.myPort)
-			err := http.ListenAndServe(":" + goslConfig.myPort, nil) // set listen port
-			checkErrPanic(err) // if it can't listen to all the above, then it has to abort anyway
-		} else {
-			// default is to run as FastCGI!
-			// works like a charm thanks to http://www.dav-muz.net/blog/2013/09/how-to-use-go-and-fastcgi/
-			log.Debug("http.DefaultServeMux is", http.DefaultServeMux)
-			if err := fcgi.Serve(nil, http.HandlerFunc(handler)); err != nil {
-				checkErrPanic(err)
-			}
+		log.Info("starting to run as web server on port :" + goslConfig.myPort)
+		err := http.ListenAndServe(":" + goslConfig.myPort, nil) // set listen port
+		checkErrPanic(err) // if it can't listen to all the above, then it has to abort anyway
+	} else {
+		// default is to run as FastCGI!
+		// works like a charm thanks to http://www.dav-muz.net/blog/2013/09/how-to-use-go-and-fastcgi/
+		log.Debug("http.DefaultServeMux is", http.DefaultServeMux)
+		log.Info("Starting to run as FastCGI")
+		if err := fcgi.Serve(nil, http.HandlerFunc(handler)); err != nil {
+			log.Errorf("seems that we got an error from FCGI: %q\n", err)
+			checkErrPanic(err)
 		}
-		// we should never have reached this point!
-		log.Error("unknown usage — this application may run as a standalone server, as a FastCGI application, or as an interactive shell")
-		if goslConfig.isServer || goslConfig.isShell {
-			flag.PrintDefaults()
-		}
+	}
+
+	// we should never have reached this point!
+	log.Error("unknown usage — this application may run as a standalone server, as a FastCGI application, or as an interactive shell")
+	if goslConfig.isServer || goslConfig.isShell {
+		flag.PrintDefaults()
 	}
 }
 
@@ -409,9 +410,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 */
-	name := r.Form.Get("name") // can be empty
-	key := r.Form.Get("key") // can be empty
-	compat := r.Form.Get("compat") // compatibility mode with W-Hat
+	name	:= r.Form.Get("name") // can be empty
+	key		:= r.Form.Get("key") // can be empty
+	compat	:= r.Form.Get("compat") // compatibility mode with W-Hat
 	var uuidToInsert avatarUUID
 	messageToSL := "" // this is what we send back to SL - defined here due to scope issues.
 	if name != "" {
