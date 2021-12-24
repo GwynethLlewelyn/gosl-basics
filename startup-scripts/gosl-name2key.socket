@@ -1,0 +1,12 @@
+[Unit]
+Description=GoSL name2key Listen Socket
+
+[Socket]
+SocketUser=www-data
+SocketGroup=www-data
+SocketMode=0600
+ListenStream=/var/run/gosl-name2key.sock
+Accept=false
+
+[Install]
+WantedBy=sockets.target

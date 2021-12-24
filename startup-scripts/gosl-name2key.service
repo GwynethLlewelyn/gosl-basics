@@ -1,0 +1,17 @@
+[Unit]
+Description=GoSL name2key service
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+StandardInput=socket
+StandardOutput=null
+StandardError=syslog
+WorkingDirectory=/var/www/html
+Environment=USER=www-data HOME=var/www/html
+ExecStart=/var/www/html/name2key.fcgi
+
+[Install]
+WantedBy=multi-user.target
