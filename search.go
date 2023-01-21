@@ -183,55 +183,55 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 // Universal search, since we put everything in the KV database, we can basically search for anything.
 // *Way* more efficient! (gwyneth 20211031)
 func searchKV(searchItem string) (name string, uuid string, grid string) {
-	var val = avatarUUID{ "", NullUUID, "" }
+	var val = avatarUUID{"", NullUUID, ""}
 	time_start := time.Now()
 	var err error // to deal with scope issues
 	switch goslConfig.database {
-		case "badger":
-			kv, err = badger.Open(Opt)
-			checkErrPanic(err)
-			defer kv.Close()
-			err = kv.View(func(txn *badger.Txn) error {
-				item, err := txn.Get([]byte(searchItem))
-				if err != nil {
-					return err
-				}
-				data, err := item.ValueCopy(nil)
-				if err != nil {
-					log.Errorf("error %q while getting data from %v\n", err, item)
-					return err
-				}
-				if err = json.Unmarshal(data, &val); err != nil {
-					log.Errorf("error while unparsing UUID for name: %q (%v)\n", searchItem, err)
-					return err
-				}
-				return nil
-			})
-		case "buntdb":
-			db, err := buntdb.Open(goslConfig.dbNamePath)
-			checkErrPanic(err)
-			defer db.Close()
-			var data string
-			err = db.View(func(tx *buntdb.Tx) error {
-				data, err = tx.Get(searchItem)
-				return err
-			})
-			err = json.Unmarshal([]byte(data), &val)
+	case "badger":
+		kv, err = badger.Open(Opt)
+		checkErrPanic(err)
+		defer kv.Close()
+		err = kv.View(func(txn *badger.Txn) error {
+			item, err := txn.Get([]byte(searchItem))
 			if err != nil {
+				return err
+			}
+			data, err := item.ValueCopy(nil)
+			if err != nil {
+				log.Errorf("error %q while getting data from %v\n", err, item)
+				return err
+			}
+			if err = json.Unmarshal(data, &val); err != nil {
+				log.Errorf("error while unparsing UUID for name: %q (%v)\n", searchItem, err)
+				return err
+			}
+			return nil
+		})
+	case "buntdb":
+		db, err := buntdb.Open(goslConfig.dbNamePath)
+		checkErrPanic(err)
+		defer db.Close()
+		var data string
+		err = db.View(func(tx *buntdb.Tx) error {
+			data, err = tx.Get(searchItem)
+			return err
+		})
+		err = json.Unmarshal([]byte(data), &val)
+		if err != nil {
+			log.Errorf("error while unparsing UUID for name: %q (%v)\n", searchItem, err)
+		}
+	case "leveldb":
+		db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
+		checkErrPanic(err)
+		defer db.Close()
+		data, err := db.Get([]byte(searchItem), nil)
+		if err != nil {
+			log.Errorf("error while getting UUID for name: %q (%v)\n", searchItem, err)
+		} else {
+			if err = json.Unmarshal(data, &val); err != nil {
 				log.Errorf("error while unparsing UUID for name: %q (%v)\n", searchItem, err)
 			}
-		case "leveldb":
-			db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
-			checkErrPanic(err)
-			defer db.Close()
-			data, err := db.Get([]byte(searchItem), nil)
-			if err != nil {
-				log.Errorf("error while getting UUID for name: %q (%v)\n", searchItem, err)
-			} else {
-				if err = json.Unmarshal(data, &val); err != nil {
-					log.Errorf("error while unparsing UUID for name: %q (%v)\n", searchItem, err)
-				}
-			}
+		}
 	}
 	log.Debugf("time to lookup %q: %v\n", searchItem, time.Since(time_start))
 	if err != nil {
