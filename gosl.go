@@ -59,22 +59,23 @@ type avatarUUID struct {
 	  \/	 \/			  \/
 */
 
-// Configuration options
+// Configuration options.
 type goslConfigOptions struct {
-	BATCH_BLOCK                             int // how many entries to write to the database as a block; the bigger, the faster, but the more memory it consumes
+	BATCH_BLOCK                             int		// how many entries to write to the database as a block; the bigger, the faster, but the more memory it consumes
 	noMemory, isServer, isShell             bool
 	myDir, myPort, importFilename, database string
-	dbNamePath                              string // for BuntDB
-	logLevel, logFilename                   string // for logs
-	maxSize, maxBackups, maxAge             int    // logs configuration option
+	configFilename							string	// name (+ path?) of the configuratio file
+	dbNamePath                              string	// for BuntDB
+	logLevel, logFilename                   string	// for logs
+	maxSize, maxBackups, maxAge             int		// logs configuration option
 }
 
 var goslConfig goslConfigOptions
 var kv *badger.DB
 
-// loadConfiguration reads our configuration from a config.toml file
+// loadConfiguration reads our configuration from a `config.ini` file,
 func loadConfiguration() {
-	fmt.Print("Reading gosl-basic configuration:") // note that we might not have go-logging active as yet, so we use fmt
+	fmt.Print("Reading gosl-basic configuration:") // note that we might not have go-logging active as yet, so we use fmt and write to stdout
 	// Open our config file and extract relevant data from there
 	err := viper.ReadInConfig() // Find and read the config file
 	if err != nil {
@@ -114,18 +115,19 @@ func loadConfiguration() {
 func main() {
 	// Flag setup; can be overridden by config file.
 	// TODO(gwyneth): I need to fix this to be the oher way round).
-	goslConfig.myPort = *flag.String("port", "3000", "Server port")
-	goslConfig.myDir = *flag.String("dir", "slkvdb", "Directory where database files are stored")
-	goslConfig.isServer = *flag.Bool("server", false, "Run as server on port "+goslConfig.myPort)
-	goslConfig.isShell = *flag.Bool("shell", false, "Run as an interactive shell")
+	goslConfig.myPort =			*flag.String("port", "3000", "Server port")
+	goslConfig.myDir =			*flag.String("dir", "slkvdb", "Directory where database files are stored")
+	goslConfig.isServer =		*flag.Bool("server", false, "Run as server on port " + goslConfig.myPort)
+	goslConfig.isShell =		*flag.Bool("shell", false, "Run as an interactive shell")
 	goslConfig.importFilename = *flag.String("import", "", "Import database from W-Hat (use the csv.bz2 versions)")
-	goslConfig.database = *flag.String("database", "badger", "Database type (badger, buntdb, leveldb)")
-	goslConfig.noMemory = *flag.Bool("nomemory", true, "Attempt to use only disk to save memory on Badger (important for shared webservers)")
+	goslConfig.configFilename =	*flag.String("config", "config", "Configuration filename [without extension]")
+	goslConfig.database = 		*flag.String("database", "badger", "Database type [badger | buntdb | leveldb]")
+	goslConfig.noMemory = 		*flag.Bool("nomemory", true, "Attempt to use only disk to save memory on Badger (important for shared webservers)")
 
 	// Config viper, which reads in the configuration file every time it's needed.
 	// Note that we need some hard-coded variables for the path and config file name.
-	viper.SetConfigName("config")
-	viper.SetConfigType("toml")                                                              // just to make sure; it's the same format as OpenSimulator (or MySQL) config files
+	viper.SetConfigName(goslConfig.configFilename)
+	viper.SetConfigType("ini")                                                              // just to make sure; it's the same format as OpenSimulator (or MySQL) config files
 	viper.AddConfigPath(".")                                                                 // optionally look for config in the working directory
 	viper.AddConfigPath("$HOME/go/src/git.gwynethllewelyn.net/GwynethLlewelyn/gosl-basics/") // that's how you'll have it
 
@@ -413,14 +415,14 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	*/
-	name := r.Form.Get("name")     // can be empty
-	key := r.Form.Get("key")       // can be empty
-	compat := r.Form.Get("compat") // compatibility mode with W-Hat
+	name	:= r.Form.Get("name")	// can be empty.
+	key		:= r.Form.Get("key")	// can be empty.
+	compat	:= r.Form.Get("compat")	// compatibility mode with W-Hat,
 	var uuidToInsert avatarUUID
 	messageToSL := "" // this is what we send back to SL - defined here due to scope issues.
 	if name != "" {
 		if key != "" {
-			// we received both: add a new entry
+			// we received both: add a new entry.
 			uuidToInsert.UUID = key
 			uuidToInsert.Grid = r.Header.Get("X-Secondlife-Shard")
 			jsonUUIDToInsert, err := json.Marshal(uuidToInsert)
@@ -428,7 +430,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			switch goslConfig.database {
 			case "badger":
 				kv, err := badger.Open(Opt)
-				checkErrPanic(err) // should probably panic
+				checkErrPanic(err) // should probably panic.
 				txn := kv.NewTransaction(true)
 				defer txn.Discard()
 				err = txn.Set([]byte(name), jsonUUIDToInsert)
