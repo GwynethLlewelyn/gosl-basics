@@ -410,7 +410,7 @@ func main() {
 				avatarKey, gridName = searchKVname(checkInput)
 				avatarName = checkInput
 			}
-			if avatarName != NullUUID && avatarKey != NullUUID {
+			if avatarName != "" && avatarKey != NullUUID {
 				fmt.Println(avatarName, "which has UUID:", avatarKey, "comes from grid:", gridName)
 			} else {
 				fmt.Println("sorry, unknown input", checkInput)
@@ -475,6 +475,11 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	messageToSL := "" // this is what we send back to SL - defined here due to scope issues.
 	if name != "" {
 		if key != "" {
+			// be stricter!
+			if len(key) != 36 || !isValidUUID(key) {
+				logErrHTTP(w, http.StatusBadRequest, fmt.Sprintf("invalid key %q", key))
+				return
+			}
 			// we received both: add a new entry.
 			uuidToInsert.UUID = key
 			uuidToInsert.Grid = r.Header.Get("X-Secondlife-Shard")
@@ -511,6 +516,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		} else {
 			// we received a name: look up its UUID key and grid.
 			key, grid := searchKVname(name)
+			if len(key) != 36 || !isValidUUID(key) {		// this is to prevent stupid mistakes!
+				key = NullUUID
+			}
 			if compat == "false" {
 				messageToSL += "UUID for '" + name + "' is: " + key + " from grid: '" + grid + "'"
 			} else { // empty also means true!
@@ -521,7 +529,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		// in this scenario, we have the UUID key but no avatar name: do the equivalent of a llKey2Name
 		name, grid := searchKVUUID(key)
 		if compat == "false" {
-			messageToSL += "avatar name for " + key + "' is '" + name + "' on grid: '" + grid + "'"
+			messageToSL += "avatar name for '" + key + "' is '" + name + "' on grid: '" + grid + "'"
 		} else { // empty also means true!
 			messageToSL += name
 		}

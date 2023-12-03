@@ -81,18 +81,12 @@ func funcName() string {
 	return ""
 }
 
-/*
-// isValidUUID checks if the UUID is valid.
-// Deprecated: Since regexps may be overkill here, Google's own package is far more efficient and we'll use it directly (gwyneth 20211031)
-func isValidUUID(uuid string) bool {
-	r := regexp.MustCompile("^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-4[a-fA-F0-9]{3}-[8|9|aA|bB][a-fA-F0-9]{3}-[a-fA-F0-9]{12}$")
-	return r.MatchString(uuid)
-}
-*/
-
-// isValidUUID checks if the UUID is valid.
+// isValidUUID returns whether the UUID is valid.
 // Thanks to Patrick D'Appollonio https://stackoverflow.com/questions/25051675/how-to-validate-uuid-v4-in-go
 //  as well as https://stackoverflow.com/a/46315070/1035977 (gwyneth 29211031)
+// This exists mostly to be able to return just _one_ value (the boolean) and not require anything else.
+// Also note that _some_ UUIDs are not fully v4 compliant; LL invented a few ones for the first "special"
+// residents.
 func isValidUUID(u string) bool {
 	_, err := uuid.Parse(u)
 	return err == nil
