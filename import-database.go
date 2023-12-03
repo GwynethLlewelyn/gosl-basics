@@ -104,7 +104,7 @@ func importDatabase(filename string) {
 				}
 			}
 			if limit % BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
-				log.Info("processing:", limit)
+				log.Debug("processing:", limit)
 				if err = txn.Commit(); err != nil {
 					log.Fatal(err)
 				}
@@ -152,7 +152,7 @@ func importDatabase(filename string) {
 				log.Debugf("Entry %04d - Name: %s UUID: %s - JSON: %s\n", limit, record[1], record[0], jsonNewEntry)
 			}
 			if limit % BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
-				log.Info("processing:", limit)
+				log.Debug("processing:", limit)
 				if err = txn.Commit(); err != nil {
 					log.Fatal(err)
 				}
@@ -191,7 +191,7 @@ func importDatabase(filename string) {
 				log.Debugf("Entry %04d - Name: %s UUID: %s - JSON: %s\n", limit, record[1], record[0], jsonNewEntry)
 			}
 			if limit % BATCH_BLOCK == 0 && limit != 0 {
-				log.Info("processing:", limit)
+				log.Debug("processing:", limit)
 				if err = db.Write(batch, nil); err != nil {
 					log.Fatal(err)
 				}
