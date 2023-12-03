@@ -373,15 +373,6 @@ func main() {
 		key, grid := searchKVname(testAvatarName)
 		log.Debugf("GET %q returned %q [grid %q]\n", testAvatarName, key, grid)
 		log.Info("KV database seems fine.")
-
-		if goslConfig.importFilename != "" {
-			log.Info("attempting to import", goslConfig.importFilename, "...")
-			importDatabase(goslConfig.importFilename)
-			log.Info("database finished import.")
-		} else {
-			// it's not an error if there is no name2key database available for import (gwyneth 20211027)
-			log.Debug("no database configured for import")
-		}
 	}
 
 	if goslConfig.isShell {
