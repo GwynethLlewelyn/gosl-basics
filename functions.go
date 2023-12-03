@@ -15,8 +15,11 @@ import (
 // checkErrPanic logs a fatal error and panics.
 func checkErrPanic(err error) {
 	if err != nil {
-		pc, file, line, ok := runtime.Caller(1)
-		log.Panicf("%s:%d (%v) [ok: %v] - panic: %v\n", filepath.Base(file), line, pc, ok, err)
+		if pc, file, line, ok := runtime.Caller(1); ok {
+			log.Panicf("%s:%d (%v) - panic: %v\n", filepath.Base(file), line, pc, err)
+			return
+		}
+		log.Panic(err)
 	}
 }
 
@@ -25,9 +28,11 @@ func checkErrPanic(err error) {
 //	this is for 'normal' situations when we want to get a log if something goes wrong but do not need to panic
 func checkErr(err error) {
 	if err != nil {
-		pc, file, line, ok := runtime.Caller(1)
-		// log.Error(filepath.Base(file), ":", line, ":", pc, ok, " - error:", err)
-		log.Errorf("%s:%d (%v) [ok: %v] - error: %v\n", filepath.Base(file), line, pc, ok, err)
+		if pc, file, line, ok := runtime.Caller(1); ok {
+			log.Errorf("%s:%d (%v) - error: %v\n", filepath.Base(file), line, pc, ok, err)
+			return
+		}
+		log.Panic(err)
 	}
 }
 
@@ -37,8 +42,11 @@ func checkErr(err error) {
 func checkErrHTTP(w http.ResponseWriter, httpStatus int, errorMessage string, err error) {
 	if err != nil {
 		http.Error(w, fmt.Sprintf(errorMessage, err), httpStatus)
-		pc, file, line, ok := runtime.Caller(1)
-		log.Error("(", http.StatusText(httpStatus), ") ", filepath.Base(file), ":", line, ":", pc, ok, " - error:", errorMessage, err)
+		if pc, file, line, ok := runtime.Caller(1); ok {
+			log.Error("(", http.StatusText(httpStatus), ") ", filepath.Base(file), ":", line, ":", pc, ok, " - error:", errorMessage, err)
+			return
+		}
+		log.Error("(", http.StatusText(httpStatus), ") ", errorMessage, err)
 	}
 }
 
@@ -46,8 +54,11 @@ func checkErrHTTP(w http.ResponseWriter, httpStatus int, errorMessage string, er
 func checkErrPanicHTTP(w http.ResponseWriter, httpStatus int, errorMessage string, err error) {
 	if err != nil {
 		http.Error(w, fmt.Sprintf(errorMessage, err), httpStatus)
-		pc, file, line, ok := runtime.Caller(1)
-		log.Panic("(", http.StatusText(httpStatus), ") ", filepath.Base(file), ":", line, ":", pc, ok, " - panic:", errorMessage, err)
+		if pc, file, line, ok := runtime.Caller(1); ok {
+			log.Panic("(", http.StatusText(httpStatus), ") ", filepath.Base(file), ":", line, ":", pc, ok, " - panic:", errorMessage, err)
+			return
+		}
+		log.Panic("(", http.StatusText(httpStatus), ") ", errorMessage, err)
 	}
 }
 
@@ -64,20 +75,24 @@ func logErrHTTP(w http.ResponseWriter, httpStatus int, errorMessage string) {
 //	This will be extensively used to deal with figuring out where in the code the errors are!
 //	Source: https://stackoverflow.com/a/10743805/1035977 (20170708)
 func funcName() string {
-	pc, _, _, _ := runtime.Caller(1)
-	return runtime.FuncForPC(pc).Name()
+	if pc, _, _, ok := runtime.Caller(1); ok {
+		return runtime.FuncForPC(pc).Name()
+	}
+	return ""
 }
 
-// isValidUUID checks if the UUID is valid.
-// Thanks to Patrick D'Appollonio https://stackoverflow.com/questions/25051675/how-to-validate-uuid-v4-in-go
-//  as well as https://stackoverflow.com/a/46315070/1035977 (gwyneth 29211031)
 /*
-// Deprecated, since regexps may be overkill here; Google's own package is far more efficient and we'll use it directly (gwyneth 20211031)
+// isValidUUID checks if the UUID is valid.
+// Deprecated: Since regexps may be overkill here, Google's own package is far more efficient and we'll use it directly (gwyneth 20211031)
 func isValidUUID(uuid string) bool {
 	r := regexp.MustCompile("^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-4[a-fA-F0-9]{3}-[8|9|aA|bB][a-fA-F0-9]{3}-[a-fA-F0-9]{12}$")
 	return r.MatchString(uuid)
 }
 */
+
+// isValidUUID checks if the UUID is valid.
+// Thanks to Patrick D'Appollonio https://stackoverflow.com/questions/25051675/how-to-validate-uuid-v4-in-go
+//  as well as https://stackoverflow.com/a/46315070/1035977 (gwyneth 29211031)
 func isValidUUID(u string) bool {
 	_, err := uuid.Parse(u)
 	return err == nil
