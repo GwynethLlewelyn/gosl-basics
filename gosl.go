@@ -28,15 +28,22 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-const NullUUID = "00000000-0000-0000-0000-000000000000" // always useful when we deal with SL/OpenSimulator...
-const databaseName = "gosl-database.db"                 // for BuntDB
+// NullUUID is the "all zeros" UUID. We assign it to a string for analogy with LSL, where
+// keys are also strings.
+var NullUUID = uuid.Nil.String()
 
 // Logging setup.
 var log = logging.MustGetLogger("gosl") // configuration for the go-logging logger, must be available everywhere
+// Sets up type of log.
 var logFormat logging.Formatter
 
 // Opt is used for Badger database setup.
 var Opt badger.Options
+
+// Set to the program name, which is the first entry in os.Args[].
+// Do some cleanup as well. This is just for avoiding redundancy and having
+// a nice-to-remember name! (gwyneth 20231203)
+var programName = filepath.Clean(os.Args[0])
 
 // AvatarUUID is the type that we store in the database; we keep a record from which grid it came from.
 // Field names need to be capitalised for JSON marshalling (it has to do with the way it works)
@@ -48,7 +55,7 @@ var Opt badger.Options
 type avatarUUID struct {
 	AvatarName string `json:"name" form:"name" binding:"required" validate:"omitempty,alphanum"`
 	UUID       string `json:"key"  form:"key"  binding:"required" validate:"omitempty,uuid4_rfc4122"`
-	Grid       string `json:"grid" form:"grid" validate:"omitempty,alphanum"`
+	Grid       string `json:"grid" form:"grid" validate:"omitempty,alphanum"`	// Grid name, if retrieved; "Production" is for SL Aditi.
 }
 
 /*
@@ -66,18 +73,19 @@ type goslConfigOptions struct {
 	loopBatch								int		// how many entries to skip when emitting debug messages in a tight loop.
 	noMemory, isServer, isShell             bool	// !isServer && !isShell => FastCGI!
 	myDir, myPort, importFilename, database string
+	databaseName							string	// Name of the database, as placed on disk. Defaults to "gosl-database.db".
 	configFilename							string	// name (+ path?) of the configuratio file.
 	dbNamePath                              string	// for BuntDB.
 	logLevel, logFilename                   string	// for logs.
 	maxSize, maxBackups, maxAge             int		// logs configuration options.
 }
 
-var goslConfig goslConfigOptions	// list of all configuration opions.
+var goslConfig goslConfigOptions	// list of all configuration options.
 var kv *badger.DB					// current KV store being used (Badger).
 
 // loadConfiguration reads our configuration from a `config.ini` file,
 func loadConfiguration() {
-	fmt.Println("Reading ", os.Args[0], " configuratiowwn:") // note that we might not have go-logging active as yet, so we use fmt and write to stdout
+	fmt.Println("Reading ", programName, " configuration:") // note that we might not have go-logging active as yet, so we use fmt and write to stdout
 	// Open our config file and extract relevant data from there
 	// Find and read the config file
 	if err := viper.ReadInConfig(); err != nil {
@@ -100,6 +108,8 @@ func loadConfiguration() {
 	goslConfig.isShell = viper.GetBool("config.isShell")
 	viper.SetDefault("config.database", "badger") // currently, badger, boltdb, leveldb.
 	goslConfig.database = viper.GetString("config.database")
+	viper.SetDefault("config.databaseName", "badger") // currently, badger, boltdb, leveldb.
+	goslConfig.databaseName = viper.GetString("config.databaseName")
 	viper.SetDefault("options.importFilename", "") // must be empty by default.
 	goslConfig.importFilename = viper.GetString("options.importFilename")
 	viper.SetDefault("options.noMemory", false)
@@ -129,7 +139,7 @@ func main() {
 	viper.AddConfigPath(".")
 	// this is also a great place to put standard configurations:
 	// NOTE:
-	viper.AddConfigPath(filepath.Join("$HOME/.config/", os.Args[0]))
+	viper.AddConfigPath(filepath.Join("$HOME/.config/", programName))
 	// last chance — check on the usual place for Go source.
 	viper.AddConfigPath("$HOME/go/src/git.gwynethllewelyn.net/GwynethLlewelyn/gosl-basics/")
 
@@ -143,6 +153,7 @@ func main() {
 	flag.StringVarP(&goslConfig.importFilename,	"import", "i", "", "Import database from W-Hat (use the csv.bz2 versions)")
 	flag.StringVar( &goslConfig.configFilename,	"config", "config.ini", "Configuration filename [extension defines type, INI by default]")
 	flag.StringVar( &goslConfig.database,		"database", "badger", "Database type [badger | buntdb | leveldb]")
+	flag.StringVarP(&goslConfig.databaseName,	"databaseName", "n", "gosl-database.db", "Database file name")
 	flag.BoolVar(   &goslConfig.noMemory,		"nomemory", true, "Attempt to use only disk to save memory on Badger (important for shared webservers)")
 	flag.StringVarP(&goslConfig.logLevel,		"debug", "d", "ERROR", "Logging level, e.g. one of [DEBUG | ERROR | NOTICE | INFO]")
 	flag.IntVarP(   &goslConfig.loopBatch,		"loopbatch", "l", 1000, "How many entries to skip when emitting debug messages in a tight loop. Only useful when importing huge databases with high logging levels. Set to 1 if you wish to see logs for all entries.")
@@ -186,7 +197,7 @@ func main() {
 
 	// NOTE(gwyneth): We cannot write to stdout if we're running as FastCGI, only to logs!
 	if goslConfig.isServer || goslConfig.isShell {
-		fmt.Println(os.Args[0], " is starting...")
+		fmt.Println(programName, " is starting...")
 	}
 
 	// This is mostly to deal with scoping issues below. (gwyneth 20211106)
@@ -265,7 +276,7 @@ func main() {
 		if goslConfig.noMemory {
 			// use disk; note that unlike the others, Badger generates its own filenames,
 			// we can only pass a _directory_... (gwyneth 20211027)
-			goslConfig.dbNamePath = filepath.Join(goslConfig.myDir, databaseName)
+			goslConfig.dbNamePath = filepath.Join(goslConfig.myDir, goslConfig.databaseName)
 			// try to create directory
 			if err = os.Mkdir(goslConfig.dbNamePath, 0700); err != nil {
 				if !os.IsExist(err) {
@@ -311,7 +322,7 @@ func main() {
 	if goslConfig.isServer || goslConfig.isShell {
 		const testAvatarName = "Nobody Here"
 
-		log.Infof("%s started and logging is set up. Proceeding to test database (%s) at %q\n", os.Args[0], goslConfig.database, goslConfig.myDir)
+		log.Infof("%s started and logging is set up. Proceeding to test database (%s) at %q\n", programName, goslConfig.database, goslConfig.myDir)
 		// generate a random UUID (gwyneth2021103) (gwyneth 20211031)
 
 		var (
@@ -338,7 +349,7 @@ func main() {
 			log.Debugf("badger SET %+v (json: %v)\n", testValue, string(jsonTestValue))
 			kv.Close()
 		case "buntdb":
-			goslConfig.dbNamePath = filepath.Join(goslConfig.myDir, databaseName)
+			goslConfig.dbNamePath = filepath.Join(goslConfig.myDir, goslConfig.databaseName)
 			db, err := buntdb.Open(goslConfig.dbNamePath)
 			checkErrPanic(err)
 			err = db.Update(func(tx *buntdb.Tx) error {
@@ -349,7 +360,7 @@ func main() {
 			log.Debugf("buntdb SET %+v (json: %v)\n", testValue, string(jsonTestValue))
 			db.Close()
 		case "leveldb":
-			goslConfig.dbNamePath = filepath.Join(goslConfig.myDir, databaseName)
+			goslConfig.dbNamePath = filepath.Join(goslConfig.myDir, goslConfig.databaseName)
 			db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
 			checkErrPanic(err)
 			err = db.Put([]byte(testAvatarName), jsonTestValue, nil)

@@ -29,7 +29,7 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 
 // searchKVname searches the KV database for an avatar name.
 func searchKVname(avatarName string) (UUID string, grid string) {
-	var val = avatarUUID{ avatarName, NullUUID, "" }
+	var val = avatarUUID{ avatarName, uuid.Nil, "" }
 	time_start := time.Now()
 	var err error // to deal with scope issues
 	switch *goslConfig.database {
@@ -82,7 +82,7 @@ func searchKVname(avatarName string) (UUID string, grid string) {
 	}
 	log.Debugf("time to lookup %q: %v\n", avatarName, time.Since(time_start))
 	if err != nil {
-		return NullUUID, ""
+		return uuid.Nil, ""
 	} // else:
 	return val.UUID, val.Grid
 }
@@ -183,7 +183,7 @@ func searchKVUUID(avatarKey string) (name string, grid string) {
 // Universal search, since we put everything in the KV database, we can basically search for anything.
 // *Way* more efficient! (gwyneth 20211031)
 func searchKV(searchItem string) (name string, uuid string, grid string) {
-	var val = avatarUUID{"", NullUUID, ""}
+	var val = avatarUUID{"", uuid.Nil, ""}
 	time_start := time.Now()
 	var err error // to deal with scope issues
 	switch goslConfig.database {
@@ -236,7 +236,7 @@ func searchKV(searchItem string) (name string, uuid string, grid string) {
 	log.Debugf("time to lookup %q: %v\n", searchItem, time.Since(time_start))
 	if err != nil {
 		checkErr(err)
-		return "", NullUUID, ""
+		return "", uuid.Nil, ""
 	} // else:
 	return val.AvatarName, val.UUID, val.Grid
 }
