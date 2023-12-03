@@ -29,7 +29,7 @@ func checkErrPanic(err error) {
 func checkErr(err error) {
 	if err != nil {
 		if pc, file, line, ok := runtime.Caller(1); ok {
-			log.Errorf("%s:%d (%v) - error: %v\n", filepath.Base(file), line, pc, ok, err)
+			log.Errorf("%s:%d (%v) - error: %v\n", filepath.Base(file), line, pc, err)
 			return
 		}
 		log.Panic(err)
@@ -43,7 +43,7 @@ func checkErrHTTP(w http.ResponseWriter, httpStatus int, errorMessage string, er
 	if err != nil {
 		http.Error(w, fmt.Sprintf(errorMessage, err), httpStatus)
 		if pc, file, line, ok := runtime.Caller(1); ok {
-			log.Error("(", http.StatusText(httpStatus), ") ", filepath.Base(file), ":", line, ":", pc, ok, " - error:", errorMessage, err)
+			log.Error("(", http.StatusText(httpStatus), ") ", filepath.Base(file), ":", line, ":", pc, " - error:", errorMessage, err)
 			return
 		}
 		log.Error("(", http.StatusText(httpStatus), ") ", errorMessage, err)
@@ -55,7 +55,7 @@ func checkErrPanicHTTP(w http.ResponseWriter, httpStatus int, errorMessage strin
 	if err != nil {
 		http.Error(w, fmt.Sprintf(errorMessage, err), httpStatus)
 		if pc, file, line, ok := runtime.Caller(1); ok {
-			log.Panic("(", http.StatusText(httpStatus), ") ", filepath.Base(file), ":", line, ":", pc, ok, " - panic:", errorMessage, err)
+			log.Panic("(", http.StatusText(httpStatus), ") ", filepath.Base(file), ":", line, ":", pc, " - panic:", errorMessage, err)
 			return
 		}
 		log.Panic("(", http.StatusText(httpStatus), ") ", errorMessage, err)
