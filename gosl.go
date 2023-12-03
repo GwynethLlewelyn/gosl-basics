@@ -268,7 +268,7 @@ func main() {
 			goslConfig.dbNamePath = filepath.Join(goslConfig.myDir, databaseName)
 			// try to create directory
 			if err = os.Mkdir(goslConfig.dbNamePath, 0700); err != nil {
-				if err != os.ErrExist {
+				if !os.IsExist(err) {
 					checkErr(err)
 				} else {
 					log.Debugf("directory %q exists, no need to create it\n", goslConfig.dbNamePath)
