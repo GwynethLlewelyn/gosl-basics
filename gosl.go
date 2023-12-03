@@ -248,6 +248,7 @@ func main() {
 			logging.SetBackend(backendFileLeveled)	// FastCGI only logs to file
 		}
 	*/
+	goslConfig.dbNamePath = filepath.Join(goslConfig.myDir, goslConfig.databaseName)
 
 	log.Debugf("Full config: %+v\n", goslConfig)
 
@@ -276,7 +277,7 @@ func main() {
 		if goslConfig.noMemory {
 			// use disk; note that unlike the others, Badger generates its own filenames,
 			// we can only pass a _directory_... (gwyneth 20211027)
-			goslConfig.dbNamePath = filepath.Join(goslConfig.myDir, goslConfig.databaseName)
+			// goslConfig.dbNamePath = filepath.Join(goslConfig.myDir, goslConfig.databaseName)
 			// try to create directory
 			if err = os.Mkdir(goslConfig.dbNamePath, 0700); err != nil {
 				if !os.IsExist(err) {
@@ -349,7 +350,7 @@ func main() {
 			log.Debugf("badger SET %+v (json: %v)\n", testValue, string(jsonTestValue))
 			kv.Close()
 		case "buntdb":
-			goslConfig.dbNamePath = filepath.Join(goslConfig.myDir, goslConfig.databaseName)
+			// goslConfig.dbNamePath = filepath.Join(goslConfig.myDir, goslConfig.databaseName)
 			db, err := buntdb.Open(goslConfig.dbNamePath)
 			checkErrPanic(err)
 			err = db.Update(func(tx *buntdb.Tx) error {
@@ -360,7 +361,7 @@ func main() {
 			log.Debugf("buntdb SET %+v (json: %v)\n", testValue, string(jsonTestValue))
 			db.Close()
 		case "leveldb":
-			goslConfig.dbNamePath = filepath.Join(goslConfig.myDir, goslConfig.databaseName)
+			// goslConfig.dbNamePath = filepath.Join(goslConfig.myDir, goslConfig.databaseName)
 			db, err := leveldb.OpenFile(goslConfig.dbNamePath, nil)
 			checkErrPanic(err)
 			err = db.Put([]byte(testAvatarName), jsonTestValue, nil)
