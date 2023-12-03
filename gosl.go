@@ -14,7 +14,7 @@ import (
 	"strings"
 	//	"time"
 
-	"github.com/dgraph-io/badger/v3"
+	"github.com/dgraph-io/badger/v4"
 	//	"github.com/dgraph-io/badger/options"
 	//	"github.com/fsnotify/fsnotify"
 	"github.com/google/uuid"
@@ -289,7 +289,7 @@ func main() {
 				log.Debugf("created new directory: %q\n", goslConfig.dbNamePath)
 			}
 
-			Opt = badger.DefaultOptions(goslConfig.dbNamePath)
+			Opt = badger.DefaultOptions(goslConfig.dbNamePath).WithLogger(log).WithLoggingLevel(badger.ERROR)
 			log.Debugf("entering disk mode, Opt is %+v\n", Opt)
 		} else {
 			// Use only memory

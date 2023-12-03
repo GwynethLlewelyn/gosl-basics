@@ -11,7 +11,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/dgraph-io/badger/v3"
+	"github.com/dgraph-io/badger/v4"
 	"github.com/h2non/filetype"
 	"github.com/h2non/filetype/matchers"
 	"github.com/syndtr/goleveldb/leveldb"

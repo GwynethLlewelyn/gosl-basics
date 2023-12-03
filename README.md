@@ -92,7 +92,7 @@ Then grab the two LSL scripts, `query.lsl` and `touch.lsl`, which ought to be in
 If something went wrong, you might need to download all external packages manually. Theoretically, the `go get` command is supposed to be clever enough to figure out everything it needs and download _everything_ automatically, but we all know how complex systems manage to fail, don't we? So, if needed, these are all the external packages (i.e. not part of the standard library) to be downloaded:
 
 ```sh
-go get github.com/dgraph-io/badger/v3
+go get github.com/dgraph-io/badger/v4
 go get github.com/h2non/filetype
 go get github.com/h2non/filetype/matchers
 go get github.com/op/go-logging

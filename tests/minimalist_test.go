@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	badger "github.com/dgraph-io/badger/v3"
+	badger "github.com/dgraph-io/badger/v4"
 )
 
 func TestMinimalistSLKVDB(t *testing.T) {
