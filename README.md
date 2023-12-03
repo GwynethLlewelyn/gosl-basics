@@ -1,12 +1,72 @@
 # gosl-basics
 
-A basic example of how to develop external web services for Second Life/OpenSimulator using the Go programming language.
+A basic example of how to develop external web services for Second Life/OpenSimulator using the Go programming language, using the ever-so-popular `key2name`/`name2key` database as a REST service.
 
 ## Why use Go?
 
-This is a basic example (although from the code it might seem complex!) on how to interface an in-world object in Second Life/OpenSimulator with a web application compiled with Go. Two huge advantages that Go has over more common web-based solutions such as PHP, .NET, Perl, Python, Java, Node.js, etc. is that unlike any of those _there is no web server configuration necessary_. Go has its own built-in web server, and Google designed it for efficiency. What this means is that you just need to compile the application and run it — no configuration necessary; no dependencies; no worrying if you have the 'right' version of the language, or the 'right' versions of the libraries and DLLs needed to run it... there is nothing of the sort! You just run the application written in Go and that's it. The second huge advantage is that Go is a _compiled language designed to be used for system administrators_ (and not necessarily a 'cutey' language for Web designers, no offence meant!). There are no 'virtual machines', no 'interpreters', no 'just-in-time compilers', no 'opcaches', or whatever is currently fashionable to offer in a modern programming language. Go compiles to efficient machine code, end of story: it can't get any faster than that (unless you write your own web server in machine code!). The trade-off? Well, you can't simply grab the application compiled in a Windows machine and expect it to run on a Linux box; you have to recompile it again. That's what _allegedly_ is the advantage of languages such as Java — write once, run on every platform that supports Java. In theory. In practice, well... no comments :)
+This is a basic example (although from the code it might seem complex!) on how to interface an in-world object in Second Life/OpenSimulator with a web application compiled with Go. A huge advantage of Go is in its modular approach, including in the way it resolves dependencies; secondly, it's the easiest cross-compiling language I ever worked with; and, thirdly, it's tremendously efficient.
 
-Because Go effectively comes with its own webserver... the code might be a little more lengthy than what you'd expect for a simple thing like this. But I've been mean and added a lot of bells and whistles, so that you don't get merely a 'skeleton' project with no clue how to extend it. `gosl-basics` may be basic, but it's a fully-fledged web server, able to run as either a stand-alone server or as a FastCGI application, including an interactive shell (or command line) to do some quick testing, it parses command-line arguments, and has a fairly sophisticated logging system, which will do automatic rotation and so forth... all the tools that you need to build a 'serious' application, in fact. In case you are wondering: no, I didn't develop any of those features, they are all shared by Go programmers via open-source repositories, which extend the 'core' functionality of Go (meaning the libraries provided by the original developers and maintainers) in a very easy way.
+What this means is that you just need to compile the application and run it — no configuration necessary; no dependencies; no worrying if you have the 'right' version of the language, or the 'right' versions of the libraries and DLLs needed to run it... there is nothing of the sort! You just run the application written in Go and that's it.
+
+Go is a _compiled language designed to be used for system administrators_ (and not necessarily a 'cutey' language for Web designers, no offence meant!). There are no 'virtual machines', no 'interpreters', no 'just-in-time compilers', no 'opcaches', or whatever is currently fashionable to offer in a modern programming language. Go compiles to efficient machine code, end of story. Well, it's not so fast as C (nothing beats C), mostly because it includes a garbage collector. But in a sense it's even stronger-typed than C++ — which aids the compiler to optimize the code — while at the core it's actually a pretty basic programming language. Some even claim that it not even supports "true" object-oriented programming, relying on a different (much simpler and way more efficient) concept instead. The result is that it's easy to learn (perhaps at the same level as C, minus pointers), with little syntactic sugar (no ternary operators, no operator overloading... and even generics were only implemented in recent versions, much against the core developers' original principles) — while insanely powerful to use (at the level of C++ and beyond).
+
+While Go is super-strongly-typed, it actually infers most types automatically. In most cases, you just assign a variable to something; no need to "declare" it first, nor even to declare its type. Go's compiler will figure it out automagically. Thus, you can easily write code that resembles JavaScript — and not TypeScript! — while at the same time benefit from the strict checking done by the compiler.
+
+Here is a basic example:
+
+```go
+i := 5
+```
+
+This declares a variable, `i`. The `:=` operator is the "assign for the first time" operator. Variables must  only use it once. The compiler automagically figures out that this is a variable assignment, if it's the first time it saw `i`. And since it gets assigned the value `5`, it _must_ be an integer. It cannot be any thing else, and cannot have any other value but an integer.
+
+You cannot redeclare it:
+
+```go
+i := 8			// throws error since the variable was already defined.
+i := "a string"	// same error; the compiler won't allow you to have any other value type for `i`.
+```
+Once _defined_, the variable will _always_ have a value. Even if you don't assign anything to it, it'll get a default value (all integers start by being 0, all strings are the empty string ""). There is no ambiguity. You don't need ever to worry if your variable is "unknown", or "unassigned", or pointing to null. The compiler either sees a variable being _correctly_ defined (there are many ways to do so, but only a _limited_ number of ways, all very-well known) or throws an error otherwise. From then onwards, you cannot ever change its type. It's written in stone and you can be sure that it won't change under the hood.
+
+You also can't assign things to it that are not of its type:
+```go
+i = 2.3		// wrong, 2.3 is a float, not an integer.
+i = "what?"	// wrong, `i` is an integer, you cannot assign strings to it!
+```
+That should be obvious for anyone used to strongly-typed languages. But because Go code so often looks as if the programmer has forgotten to declare variables, it _almost_ looks like you can have the sort of volatile variables so popular under PHP or JavaScript or even Lua (and many other interpreted language).
+
+This strictness _also_ applies to pointers. You _can_ have pointers — since everything is passed by value, it's useful to have a way to pass pointers to a value instead, mostly to save memory. But you cannot wreak havoc with pointers — they are as strongly typed as any other type! A pointer to an integer is _not_ a pointer to a float — even if, when looking inside the actual pointer representation, they seem to be the same thing (basically a 64-bit integer). But they aren't, and the compiler _knows_ they're different, so it does _not_ allow you to mix and match them. A "pointer to a type" is _also_ a type, and as strongly enforced as any other.
+
+Well, if you hate too-strongly-typed languages (think C#!) because they force you to spend most of your time converting between almost-the-same-but-not-quite types, endlessly adding new classes to deal with the mess of having similar but not equal types... good news: Go is totally different in concept. In practice, the _need_ to explicitly typecast variables all the time is severely restricted to a few exceptional cases, and that's because, _most_ of the time, you will _not_ need to worry about any of that. In Go, the most interesting underlying principle is "if it walks like a duck, and quacks like a duck, then I'll be happy to consider it a duck". That's actually how Go implements its own flavour of class inheritance: so long as your function "walks and quacks like a duck" (i.e., it has the same _signature_ as a duck), you can use it with the "duck class" — you don't need to create a new class, inherit a new class, write conversion functions, have special getters/setters or similar syntactic sugar to make such conversions easier, etc. You just rely on the principle that ducks walk in a certain way and quack. Simple. The compiler _knows_ that if something walks like a duck but does *not* quack, but clucks... well, then, it's _not_ a duck, and it throws a compilation error. The compiler _knows_ that a duck is not a chicken (and vice-versa) and keeps them apart.
+
+Go has also a weird look to its code density: it's simultaneously a very compact language (you write little to achieve a lot!), but at the same time, it _seems_ to be as verbose as, well, BASIC. There are almost none of those fancy things that are so popular on contemporary modern languages. I've already mentioned the lack of a ternary operator, but there are many more cases of (apparently) missing functionality.
+
+The first that stands out is the complete absence of a `try...catch` construction. Error handling _seems_ to be insanely primitive without those fancy constructs (which vary across languages, of course — some are more sophisticated in the way errors are handled, with multiple possible outcomes for an assertion test), and, in fact, Go code is full of entries that look much more like BASIC than a "true" descendant of C/C++/C#/Java/JavaScript/PHP family.
+
+However, don't get deluded by its _apparent_ simplicity. In fact, idiomatic Go is based on the assumption that most functions will throw an error (which, BTW, is just another type, nothing special about it; and a pretty primitive one at that!). You essentially check if the error is nil or not. If it is, that means "no error" and you can go ahead. If it's anything else, then it contains some sort of error. Good, but, in Go, you don't really need to immediately jump on it. You can just pass it along to whoever called _your_ code. This is actually baffling for new users (including myself). There is not really a `throw` as you do on other languages, but rather simply saying, "oh goodie, I got an error, let's return it and forget about the rest of our code". And that's it.
+
+Well, almost. Go has two tricks up its sleeve. The first is a Lua-like way of returning _more than one value_. While strange at the beginning, once you get used to it, you don't want to go back to any other single-returned-value language any longer. The idea is that functions don't simply return a null (or nil in Go-parlance) and expect programmers to `catch` whatever error was produced; instead, Go functions tend to return _both_ the result _and_ the error (or nil for no error) — as two _separate_ variables, which you can then proceed to independently check:
+
+```go
+if result, err := myFunction("some string parameter", 1337); err != nil {
+	fmt.Println("Got error:", err)
+}
+
+Note that `if` can also take _several_ statements, not just one; the above could be written as
+
+```go
+if result, err := myFunction("some string parameter", 1337)
+if err != nil {
+	fmt.Println("Got error:", err)
+}
+```
+But that level of "verbosity" can be condensed as shown above, which has an added advantage: `err` is just declared on a _local_ scope, and will be unavailable outside it; by contrast, in the block below, a new `err` variable will be defined and will remain in existence after the check.
+
+An interesting feature of Go is that you can also "catch" errors from functions called — several levels deep, in some cases, if all levels implement things correctly. For instance, consider that you have a function that reads some configuration parameters from a file. But if that file doesn't exist, or is not readable (permission error!), what can you do about it? Well, idiomatic Go simple calls a `panic` — and passes the error along to whoever called it. The caller can then make a choice: will it ignore the error — or attempt to provide a fix? In the given example, you might have a "fall-back" file to read from. Or forget about all the missing/broken/inacessible flle and plod along the rest of the code. All these approaches are perfectly acceptable: you can decide to _consume_ the panic error, while not really "crashing" to disk.
+
+\[To be continued...\]s
+
+Finally, because Go effectively comes with its own webserver... the code might be a little more lengthy than what you'd expect for a simple thing like this. But I've been mean and added a lot of bells and whistles, so that you don't get merely a 'skeleton' project with no clue how to extend it. `gosl-basics` may be basic, but it's a fully-fledged web server, able to run as either a stand-alone server or as a FastCGI application, including an interactive shell (or command line) to do some quick testing, it parses command-line arguments, and has a fairly sophisticated logging system, which will do automatic rotation and so forth... all the tools that you need to build a 'serious' application, in fact. In case you are wondering: no, I didn't develop any of those features, they are all shared by Go programmers via open-source repositories, which extend the 'core' functionality of Go (meaning the libraries provided by the original developers and maintainers) in a very easy way.
 
 ## Yes, fine, but what does this application actually _do_?
 
@@ -21,8 +81,9 @@ Instead, I rather prefer to show how it's done in Go.
 ## Installation overview
 
 Requirements:
-- You need to have [Go](https://golang.org) installed and configured properly
-- Your computer/server needs to have a publicly accessible IP (and set it up with a **dynamic DNS provider** such as [no-ip.com](https://www.noip.com/remote-access)); you _can_ run it from home if you wish
+
+-   You need to have [Go](https://golang.org) installed and configured properly
+-   Your computer/server needs to have a publicly accessible IP (and set it up with a **dynamic DNS provider** such as [no-ip.com](https://www.noip.com/remote-access)); you _can_ run it from home if you wish
 
 Finally, `go get git.gwynethllewelyn.net/GwynethLlewelyn/gosl-basics.git`, and you _ought_ to have a binary executable file in `~/go/bin` called `gosl-basics.git`. Just run it!
 
@@ -30,7 +91,7 @@ Then grab the two LSL scripts, `query.lsl` and `touch.lsl`, which ought to be in
 
 If something went wrong, you might need to download all external packages manually. Theoretically, the `go get` command is supposed to be clever enough to figure out everything it needs and download _everything_ automatically, but we all know how complex systems manage to fail, don't we? So, if needed, these are all the external packages (i.e. not part of the standard library) to be downloaded:
 
-````sh
+```sh
 go get github.com/dgraph-io/badger/v3
 go get github.com/h2non/filetype
 go get github.com/h2non/filetype/matchers
@@ -41,31 +102,36 @@ go get github.com/syndtr/goleveldb/leveldb
 go get github.com/syndtr/goleveldb/leveldb/util
 go get github.com/tidwall/buntdb
 go get gopkg.in/natefinch/lumberjack.v2
-````
+```
 
 These are for 3 different key/value databases; handling command-line flags and a configuration file; a powerful logging system; and a way to rotate logs (a lumberjack... chops down logs... get it? :) Aye, Gophers have a sense of humour).
 
 **Note:** If modules are fully functional on your system, you ought to type this instead:
 
-````sh
+```sh
 go mod tidy
 go get -u
-````
+```
 
 ## Configuration
-You can run the executable either as:
 
-      --database string   Database type (badger, buntdb, leveldb) (default "badger")
-      --dir string        Directory where database files are stored (default "slkvdb")
-      --import string     Import database from W-Hat (use the csv.bz2 version) (default "name2key.csv.bz2")
-      --nomemory          Attempt to use only disk to save memory on Badger (important for shared webservers)
-      --port string       Server port (default "3000")
-      --server            Run as server on port 3000
-      --shell             Run as an interactive shell
+You can run the executable with (at least) the following parameters:
 
-Basically, if you are running your own server (possibly at home!), you only need to run `gosl-basics -server`. You don't need to set up Apache or nginx or any other third-party software; `gosl-basics` is a fully standalone application and does not depend on anything.
+  -b, --batchblock int    How many entries to write to the database as a block; the bigger, the faster, but the more memory it consumes. (default 100000)
+	  --config string     Configuration filename [extension defines type, INI by default] (default "config.ini")
+	  --database string   Database type [badger | buntdb | leveldb] (default "badger")
+  -d, --debug string      Logging level, e.g. one of [DEBUG | ERROR | NOTICE | INFO] (default "ERROR")
+	  --dir string        Directory where database files are stored (default "slkvdb")
+  -i, --import string     Import database from W-Hat (use the csv.bz2 versions)
+  -l, --loopbatch int     How many entries to skip when emitting debug messages in a tight loop. Only useful when importing huge databases with high logging levels. Set to 1 if you wish to see logs for all entries. (default 1000)
+	  --nomemory          Attempt to use only disk to save memory on Badger (important for shared webservers) (default true)
+  -p, --port string       Server port (default "3000")
+	  --server            Run as server on port 3000
+	  --shell             Run as an interactive shell
 
-If you're using a shared web server, like the ones provided by [Dreamhost](https://dreamhost.com), then you will very likely want to run `gosl-basics` as a FastCGI application. Why? Well, Dreamhost's Terms of Service explicitly forbid any application to be run all the time (to conserve memory, CPU slices, and, well, open ports). Instead, they offer the ability to run applications as FastCGI applications instead (under their own Apache). This is actually a very cool interface (as opposed to the ancient, non-fast CGI...) allowing parts of the setup of the application to be done when it is called the first time, and then launch requests on demand. _If_ there is a _lot_ of traffic, the application will actually remain active in memory/CPU for a long time! If it only gets sporadic calls once in a while, well, in that case, the application gets removed from memory until someone calls the URL again. I have not tested exhaustively, and this will certainly depend from provider to provider, but Dreamhost seems to allow the application to remain active in memory and in the process space for 30-60 seconds.
+Basically, if you are running your own server (possibly at home!), you only need to run `gosl-basics --server`. You don't need to set up Apache or nginx or any other third-party software; `gosl-basics` is a fully standalone application and does not depend on anything.
+
+If you're using a shared web server, like the ones provided by [Dreamhost](https://dreamhost.com) or [Bluehost](https://bluehost.com), then you will very likely want to run `gosl-basics` as a FastCGI application. Why? Well — to take an example — Dreamhost's Terms of Service explicitly forbid any application to be run all the time (to conserve memory, CPU slices, and, well, open ports). Instead, they offer the ability to run applications as FastCGI applications instead (under their own Apache). This is actually a very cool interface (as opposed to the ancient, non-fast CGI...) allowing parts of the setup of the application to be done when it is called the first time, and then launch requests on demand. _If_ there is a _lot_ of traffic, the application will actually remain active in memory/CPU for a long time! If it only gets sporadic calls once in a while, well, in that case, the application gets removed from memory until someone calls the URL again. I have not tested exhaustively, and this will certainly depend from provider to provider, but Dreamhost seems to allow the application to remain active in memory and in the process space for 30-60 seconds.
 
 Remember to set your URLs on each of the two LSL scripts!
 
@@ -93,7 +159,7 @@ Importing the whole W-Hat database, which has a bit over 9 million entries, took
 
 This also works for OpenSimulator grids and you can use the same scripts and database if you wish. Currently, the database stores an extra field with UUID, which is usually set to the name of the grid. Linden Lab sets these as 'Production' and 'Testing' respectively; other grid operators may use other names. There is no guarantee that every grid operator has configured their database with an unique name. Also, because of the way the key/value database works, it _assumes_ that all avatar names are unique across _all_ grids, which may not be true: only UUIDs are guaranteed to be unique. The reason why this was implemented this way was that I wanted _very fast_ name2key searches, while I'm not worried about very slow key2name searches, since those are implemented in LSL anyway. To make sure that you can have many avatars with the same name but different UUIDs, well, it would require a different kind of database. Also, what should a function return for an avatar with three different UUIDs? You can see the problem there. Therefore I kept it simple, but be mindful of this limitation.
 
-Oh, and with 9 million entries, this is slow.
+Oh, and with ~10 million entries, this is slow.
 
 ## Which database is best?
 
@@ -121,7 +187,7 @@ Last but not least, I didn't bother to use transactions with LevelDB; this _migh
 
 LevelDB, by contrast, doesn't bother with any of that. It seems to achieve sheer performance by keeping everything simple. I mean, I'm not arguing about a 5% increase in performance (which would be more than enough to become a subject of an academic paper in fine-tuning K/V databases); nor even about the way LevelDB manages to keep a small memory footprint even when importing 9 million records. No, I'm really talking about _orders of magnitude_. A search under BoltDB or Badger takes something between 50 and 500 ms; a full iteration, as said, can take as long as one full _minute_. Importing 9 million records takes around 3 minutes.
 
-Contrast this with LevelDB: a search takes _micro_seconds, not _milli_seconds! That's pretty much what I _expect_ from a K/V database; after all, I can certainly get queries in the low millisecond range using, say, MySQL. A full iteration through all records takes of course much longer: a couple of seconds or so. Well, for the purposes of demonstration, having a round-trip time of 2 seconds is almost tolerable within Second Life. One minute, or even half a minute, is not.
+Contrast this with LevelDB: a search takes _micro_seconds, not \_milli_seconds! That's pretty much what I \_expect_ from a K/V database; after all, I can certainly get queries in the low millisecond range using, say, MySQL. A full iteration through all records takes of course much longer: a couple of seconds or so. Well, for the purposes of demonstration, having a round-trip time of 2 seconds is almost tolerable within Second Life. One minute, or even half a minute, is not.
 
 So clearly either my code is seriously wrong, or I have no idea how people benchmark BoltDB and Badger against LevelDB! :-)
 

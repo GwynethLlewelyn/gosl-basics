@@ -21,8 +21,8 @@ import (
 
 // importDatabase is essentially reading a bzip2'ed CSV file with UUID,AvatarName downloaded from http://w-hat.com/#name2key .
 //
-//	One could theoretically set a cron job to get this file, save it on disk periodically, and keep the database up-to-date
-//	see https://stackoverflow.com/questions/24673335/how-do-i-read-a-gzipped-csv-file for the actual usage of these complicated things!
+//	One could theoretically set a cron job to get this file, save it on disk periodically, and keep the database up-to-date.
+//	See https://stackoverflow.com/questions/24673335/how-do-i-read-a-gzipped-csv-file for the actual usage of these complicated things!
 func importDatabase(filename string) {
 	filehandler, err := os.Open(filename)
 	if err != nil {
@@ -65,6 +65,8 @@ func importDatabase(filename string) {
 	}
 
 	limit := 0               // outside of for loop so that we can count how many entries we had in total
+	BATCH_BLOCK := goslConfig.BATCH_BLOCK	// saving a few array calls...
+	loopBatch := goslConfig.loopBatch		// define statically up here.
 	time_start := time.Now() // we want to get an idea on how long this takes
 
 	switch goslConfig.database {
@@ -89,7 +91,9 @@ func importDatabase(filename string) {
 			if err != nil {
 				log.Warning(err)
 			} else {
-				log.Debugf("Entry %04d - Name: %s UUID: %s - JSON: %s\n", limit, record[1], record[0], jsonNewEntry)
+				if limit % loopBatch == 0 {
+					log.Debugf("Entry %04d - Name: %s UUID: %s - JSON: %s\n", limit, record[1], record[0], jsonNewEntry)
+				}
 				// Place this record under the avatar's name
 				if err = txn.Set([]byte(record[1]), jsonNewEntry); err != nil {
 					log.Fatal(err)
@@ -99,7 +103,7 @@ func importDatabase(filename string) {
 					log.Fatal(err)
 				}
 			}
-			if limit%goslConfig.BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
+			if limit % BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
 				log.Info("processing:", limit)
 				if err = txn.Commit(); err != nil {
 					log.Fatal(err)
@@ -144,7 +148,10 @@ func importDatabase(filename string) {
 					log.Fatal(err)
 				}
 			}
-			if limit%goslConfig.BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
+			if limit % loopBatch == 0 {
+				log.Debugf("Entry %04d - Name: %s UUID: %s - JSON: %s\n", limit, record[1], record[0], jsonNewEntry)
+			}
+			if limit % BATCH_BLOCK == 0 && limit != 0 { // we do not run on the first time, and then only every BATCH_BLOCK times
 				log.Info("processing:", limit)
 				if err = txn.Commit(); err != nil {
 					log.Fatal(err)
@@ -165,7 +172,6 @@ func importDatabase(filename string) {
 		checkErrPanic(err)
 		defer db.Close()
 		batch := new(leveldb.Batch)
-
 		for ; ; limit++ {
 			record, err := cr.Read()
 			if err == io.EOF {
@@ -181,7 +187,10 @@ func importDatabase(filename string) {
 				batch.Put([]byte(record[1]), jsonNewEntry)
 				batch.Put([]byte(record[0]), jsonNewEntry)
 			}
-			if limit%goslConfig.BATCH_BLOCK == 0 && limit != 0 {
+			if limit % loopBatch == 0 {
+				log.Debugf("Entry %04d - Name: %s UUID: %s - JSON: %s\n", limit, record[1], record[0], jsonNewEntry)
+			}
+			if limit % BATCH_BLOCK == 0 && limit != 0 {
 				log.Info("processing:", limit)
 				if err = db.Write(batch, nil); err != nil {
 					log.Fatal(err)

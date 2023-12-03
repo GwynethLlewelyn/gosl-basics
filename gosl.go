@@ -1,4 +1,5 @@
-// gosl is a basic example of how to develop external web services for Second Life/OpenSimulator using the Go programming language.
+// gosl implements the name2key/key2name functionality for about
+// ten million avatar names (1/6 of the total database)
 package main
 
 import (
@@ -61,29 +62,34 @@ type avatarUUID struct {
 
 // Configuration options.
 type goslConfigOptions struct {
-	BATCH_BLOCK                             int		// how many entries to write to the database as a block; the bigger, the faster, but the more memory it consumes
-	noMemory, isServer, isShell             bool
+	BATCH_BLOCK                             int		// how many entries to write to the database as a block; the bigger, the faster, but the more memory it consumes.
+	loopBatch								int		// how many entries to skip when emitting debug messages in a tight loop.
+	noMemory, isServer, isShell             bool	// !isServer && !isShell => FastCGI!
 	myDir, myPort, importFilename, database string
-	configFilename							string	// name (+ path?) of the configuratio file
-	dbNamePath                              string	// for BuntDB
-	logLevel, logFilename                   string	// for logs
-	maxSize, maxBackups, maxAge             int		// logs configuration option
+	configFilename							string	// name (+ path?) of the configuratio file.
+	dbNamePath                              string	// for BuntDB.
+	logLevel, logFilename                   string	// for logs.
+	maxSize, maxBackups, maxAge             int		// logs configuration options.
 }
 
-var goslConfig goslConfigOptions
-var kv *badger.DB
+var goslConfig goslConfigOptions	// list of all configuration opions.
+var kv *badger.DB					// current KV store being used (Badger).
 
 // loadConfiguration reads our configuration from a `config.ini` file,
 func loadConfiguration() {
-	fmt.Print("Reading gosl-basic configuration:") // note that we might not have go-logging active as yet, so we use fmt and write to stdout
+	fmt.Println("Reading gosl-basic configuration:") // note that we might not have go-logging active as yet, so we use fmt and write to stdout
 	// Open our config file and extract relevant data from there
-	err := viper.ReadInConfig() // Find and read the config file
-	if err != nil {
-		fmt.Println("error reading config file:", err)
-		return // we might still get away with this!
+	// Find and read the config file
+	if err := viper.ReadInConfig(); err != nil {
+		fmt.Printf("error reading config file %q, falling back to defaults - error was: %s\n", goslConfig.configFilename, err)
+		// we fall back to what we have
 	}
-	viper.SetDefault("config.BATCH_BLOCK", 100000) // NOTE(gwyneth): the authors of say that 100000 is way too much for Badger													// NOTE(gwyneth): let's see what happens with BuntDB
+	// NOTE(gwyneth): the authors of say that 100000 is way too much for Badger.
+	// Let's see what happens with BuntDB
+	viper.SetDefault("config.BATCH_BLOCK", 100000)
 	goslConfig.BATCH_BLOCK = viper.GetInt("config.BATCH_BLOCK")
+	viper.SetDefault("config.loopBatch", 1000)
+	goslConfig.loopBatch = viper.GetInt("config.loopBatch")
 	viper.SetDefault("config.myPort", 3000)
 	goslConfig.myPort = viper.GetString("config.myPort")
 	viper.SetDefault("config.myDir", "slkvdb")
@@ -92,9 +98,9 @@ func loadConfiguration() {
 	goslConfig.isServer = viper.GetBool("config.isServer")
 	viper.SetDefault("config.isShell", false)
 	goslConfig.isShell = viper.GetBool("config.isShell")
-	viper.SetDefault("config.database", "badger") // currently, badger, boltdb, leveldb
+	viper.SetDefault("config.database", "badger") // currently, badger, boltdb, leveldb.
 	goslConfig.database = viper.GetString("config.database")
-	viper.SetDefault("options.importFilename", "") // must be empty by default
+	viper.SetDefault("options.importFilename", "") // must be empty by default.
 	goslConfig.importFilename = viper.GetString("options.importFilename")
 	viper.SetDefault("options.noMemory", false)
 	goslConfig.noMemory = viper.GetBool("options.noMemory")
@@ -113,28 +119,60 @@ func loadConfiguration() {
 
 // main() starts here.
 func main() {
+	// Config viper, which reads in the configuration file every time it's needed.
+	// Note that we need some hard-coded variables for the path and config file name.
+	viper.SetDefault(goslConfig.configFilename, "config.ini")
+	viper.SetConfigName(goslConfig.configFilename)
+	// just to make sure; it's the same format as OpenSimulator (or MySQL) config files.
+	viper.SetConfigType("ini")
+	// optionally, look for config in the working directory.
+	viper.AddConfigPath(".")
+	// this is also a great place to put standard configurations:
+	// NOTE:
+	viper.AddConfigPath(filepath.Join("$HOME/.config/", os.Args[0]))
+	// last chance — check on the usual place for Go source.
+	viper.AddConfigPath("$HOME/go/src/git.gwynethllewelyn.net/GwynethLlewelyn/gosl-basics/")
+
+	loadConfiguration()
+
 	// Flag setup; can be overridden by config file.
-	// TODO(gwyneth): I need to fix this to be the oher way round).
-	goslConfig.myPort =			*flag.String("port", "3000", "Server port")
+	goslConfig.myPort =			*flag.StringP("port", "p", "3000", "Server port")
 	goslConfig.myDir =			*flag.String("dir", "slkvdb", "Directory where database files are stored")
 	goslConfig.isServer =		*flag.Bool("server", false, "Run as server on port " + goslConfig.myPort)
 	goslConfig.isShell =		*flag.Bool("shell", false, "Run as an interactive shell")
-	goslConfig.importFilename = *flag.String("import", "", "Import database from W-Hat (use the csv.bz2 versions)")
-	goslConfig.configFilename =	*flag.String("config", "config", "Configuration filename [without extension]")
+	goslConfig.importFilename = *flag.StringP("import", "i", "", "Import database from W-Hat (use the csv.bz2 versions)")
+	goslConfig.configFilename =	*flag.String("config", "config.ini", "Configuration filename [extension defines type, INI by default]")
 	goslConfig.database = 		*flag.String("database", "badger", "Database type [badger | buntdb | leveldb]")
 	goslConfig.noMemory = 		*flag.Bool("nomemory", true, "Attempt to use only disk to save memory on Badger (important for shared webservers)")
+	goslConfig.logLevel =		*flag.StringP("debug", "d", "ERROR", "Logging level, e.g. one of [DEBUG | ERROR | NOTICE | INFO]")
+	goslConfig.loopBatch =		*flag.IntP("loopbatch", "l", 1000, "How many entries to skip when emitting debug messages in a tight loop. Only useful when importing huge databases with high logging levels. Set to 1 if you wish to see logs for all entries.")
+	goslConfig.BATCH_BLOCK = 	*flag.IntP("batchblock", "b", 100000, "How many entries to write to the database as a block; the bigger, the faster, but the more memory it consumes.")
 
-	// Config viper, which reads in the configuration file every time it's needed.
-	// Note that we need some hard-coded variables for the path and config file name.
-	viper.SetConfigName(goslConfig.configFilename)
-	viper.SetConfigType("ini")                                                              // just to make sure; it's the same format as OpenSimulator (or MySQL) config files
-	viper.AddConfigPath(".")                                                                 // optionally look for config in the working directory
-	viper.AddConfigPath("$HOME/go/src/git.gwynethllewelyn.net/GwynethLlewelyn/gosl-basics/") // that's how you'll have it
-
-	loadConfiguration()
 	// default is FastCGI
 	flag.Parse()
-	viper.BindPFlags(flag.CommandLine)
+	if err := viper.BindPFlags(flag.CommandLine); err != nil {
+		fmt.Printf("error parsing/binding flags: %s\n", err)
+	}
+
+	if goslConfig.configFilename != "config.ini" {
+		viper.SetConfigName(goslConfig.configFilename)
+		// we can switch filetypes here
+		ext := filepath.Ext(goslConfig.configFilename)[1:]
+		viper.SetConfigType(ext)
+		// Find and read the config fil
+		if err := viper.ReadInConfig(); err != nil {
+			fmt.Printf("error reading config file %q [type %s], falling back to defaults - error was: %s\n", goslConfig.configFilename, ext, err)
+			// we fall back to what we have
+		}
+	}
+
+	// Avoid division by zero...
+	if goslConfig.BATCH_BLOCK < 1 {
+		goslConfig.BATCH_BLOCK = 1
+	}
+	if goslConfig.loopBatch < 1 {
+		goslConfig.loopBatch = 1
+	}
 
 	// this will allow our configuration file to be 'read on demand'
 	// TODO(gwyneth): There is something broken with this, no reason why... (gwyneth 20211026)
@@ -148,7 +186,7 @@ func main() {
 
 	// NOTE(gwyneth): We cannot write to stdout if we're running as FastCGI, only to logs!
 	if goslConfig.isServer || goslConfig.isShell {
-		fmt.Println("gosl is starting...")
+		fmt.Println(os.Args[0], " is starting...")
 	}
 
 	// This is mostly to deal with scoping issues below. (gwyneth 20211106)
@@ -199,6 +237,8 @@ func main() {
 			logging.SetBackend(backendFileLeveled)	// FastCGI only logs to file
 		}
 	*/
+
+	log.Debugf("Full config: %+v\n", goslConfig)
 
 	// Check if this directory actually exists; if not, create it. Panic if something wrong happens (we cannot proceed without a valid directory for the database to be written)
 	if stat, err := os.Stat(goslConfig.myDir); err == nil && stat.IsDir() {
@@ -262,7 +302,7 @@ func main() {
 		log.Info("database finished import.")
 	} else {
 		// it's not an error if there is no name2key database available for import (gwyneth 20211027)
-		log.Debug("no database configured for import")
+		log.Debug("no database configured for import — 🆗")
 	}
 
 	// Prepare testing data! (common to all database types)
@@ -271,7 +311,7 @@ func main() {
 	if goslConfig.isServer || goslConfig.isShell {
 		const testAvatarName = "Nobody Here"
 
-		log.Infof("gosl started and logging is set up. Proceeding to test database (%s) at %q\n", goslConfig.database, goslConfig.myDir)
+		log.Infof("%s started and logging is set up. Proceeding to test database (%s) at %q\n", os.Args[0], goslConfig.database, goslConfig.myDir)
 		// generate a random UUID (gwyneth2021103) (gwyneth 20211031)
 
 		var (
