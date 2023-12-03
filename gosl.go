@@ -1,5 +1,5 @@
 // gosl implements the name2key/key2name functionality for about
-// ten million avatar names (1/6 of the total database)
+// ten million avatar names (≈⅙ of the total database).
 package main
 
 import (
@@ -77,7 +77,7 @@ var kv *badger.DB					// current KV store being used (Badger).
 
 // loadConfiguration reads our configuration from a `config.ini` file,
 func loadConfiguration() {
-	fmt.Println("Reading gosl-basic configuration:") // note that we might not have go-logging active as yet, so we use fmt and write to stdout
+	fmt.Println("Reading ", os.Args[0], " configuratiowwn:") // note that we might not have go-logging active as yet, so we use fmt and write to stdout
 	// Open our config file and extract relevant data from there
 	// Find and read the config file
 	if err := viper.ReadInConfig(); err != nil {
@@ -136,17 +136,17 @@ func main() {
 	loadConfiguration()
 
 	// Flag setup; can be overridden by config file.
-	goslConfig.myPort =			*flag.StringP("port", "p", "3000", "Server port")
-	goslConfig.myDir =			*flag.String("dir", "slkvdb", "Directory where database files are stored")
-	goslConfig.isServer =		*flag.Bool("server", false, "Run as server on port " + goslConfig.myPort)
-	goslConfig.isShell =		*flag.Bool("shell", false, "Run as an interactive shell")
-	goslConfig.importFilename = *flag.StringP("import", "i", "", "Import database from W-Hat (use the csv.bz2 versions)")
-	goslConfig.configFilename =	*flag.String("config", "config.ini", "Configuration filename [extension defines type, INI by default]")
-	goslConfig.database = 		*flag.String("database", "badger", "Database type [badger | buntdb | leveldb]")
-	goslConfig.noMemory = 		*flag.Bool("nomemory", true, "Attempt to use only disk to save memory on Badger (important for shared webservers)")
-	goslConfig.logLevel =		*flag.StringP("debug", "d", "ERROR", "Logging level, e.g. one of [DEBUG | ERROR | NOTICE | INFO]")
-	goslConfig.loopBatch =		*flag.IntP("loopbatch", "l", 1000, "How many entries to skip when emitting debug messages in a tight loop. Only useful when importing huge databases with high logging levels. Set to 1 if you wish to see logs for all entries.")
-	goslConfig.BATCH_BLOCK = 	*flag.IntP("batchblock", "b", 100000, "How many entries to write to the database as a block; the bigger, the faster, but the more memory it consumes.")
+	flag.StringVarP(&goslConfig.myPort,			"port", "p", "3000", "Server port")
+	flag.StringVar( &goslConfig.myDir,			"dir", "slkvdb", "Directory where database files are stored")
+	flag.BoolVar(   &goslConfig.isServer,		"server", false, "Run as server on port " + goslConfig.myPort)
+	flag.BoolVar(   &goslConfig.isShell,		"shell", false, "Run as an interactive shell")
+	flag.StringVarP(&goslConfig.importFilename,	"import", "i", "", "Import database from W-Hat (use the csv.bz2 versions)")
+	flag.StringVar( &goslConfig.configFilename,	"config", "config.ini", "Configuration filename [extension defines type, INI by default]")
+	flag.StringVar( &goslConfig.database,		"database", "badger", "Database type [badger | buntdb | leveldb]")
+	flag.BoolVar(   &goslConfig.noMemory,		"nomemory", true, "Attempt to use only disk to save memory on Badger (important for shared webservers)")
+	flag.StringVarP(&goslConfig.logLevel,		"debug", "d", "ERROR", "Logging level, e.g. one of [DEBUG | ERROR | NOTICE | INFO]")
+	flag.IntVarP(   &goslConfig.loopBatch,		"loopbatch", "l", 1000, "How many entries to skip when emitting debug messages in a tight loop. Only useful when importing huge databases with high logging levels. Set to 1 if you wish to see logs for all entries.")
+	flag.IntVarP(   &goslConfig.BATCH_BLOCK,	"batchblock", "b", 100000, "How many entries to write to the database as a block; the bigger, the faster, but the more memory it consumes.")
 
 	// default is FastCGI
 	flag.Parse()
@@ -247,7 +247,7 @@ func main() {
 	} else {
 		// try to create directory
 		if err = os.Mkdir(goslConfig.myDir, 0700); err != nil {
-			if err != os.ErrExist {
+			if !os.IsExist(err) {
 				checkErr(err)
 			} else {
 				log.Debugf("directory %q exists, no need to create it\n", goslConfig.myDir)
@@ -406,6 +406,7 @@ func main() {
 		}
 		// never leaves until Ctrl-C or by typing `quit`. (gwyneth 20211106)
 		log.Debug("interactive session finished.")
+		os.Exit(0)	// normal exit
 	} else if goslConfig.isServer {
 		// set up routing.
 		// NOTE(gwyneth): one function only because FastCGI seems to have problems with multiple handlers.
@@ -435,14 +436,14 @@ func main() {
 
 // handler deals with incoming queries and/or associates avatar names with keys depending on parameters.
 // Basically we check if both an avatar name and a UUID key has been received: if yes, this means a new entry;
-// -	if just the avatar name was received, it means looking up its key;
-// -	if just the key was received, it means looking up the name (not necessary since llKey2Name does that, but it's just to illustrate);
-//   - if nothing is received, then return an error
+// - if just the avatar name was received, it means looking up its key;
+// - if just the key was received, it means looking up the name (not necessary since llKey2Name does that, but it's just to illustrate);
+// - if nothing is received, then return an error.
 //
 // Note: to ensure quick lookups, we actually set *two* key/value pairs, one with avatar name/UUID,
 // the other with UUID/name — that way, we can efficiently search for *both* in the same database!
 // Theoretically, we could even have *two* KV databases, but that's too much trouble for the
-// sake of some extra efficiency (gwyneth 20211030)
+// sake of some extra efficiency. (gwyneth 20211030)
 func handler(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		logErrHTTP(w, http.StatusNotFound, "no avatar and/or UUID received")
