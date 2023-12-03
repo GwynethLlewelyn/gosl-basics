@@ -85,8 +85,7 @@ func funcName() string {
 // Thanks to Patrick D'Appollonio https://stackoverflow.com/questions/25051675/how-to-validate-uuid-v4-in-go
 //  as well as https://stackoverflow.com/a/46315070/1035977 (gwyneth 29211031)
 // This exists mostly to be able to return just _one_ value (the boolean) and not require anything else.
-// Also note that _some_ UUIDs are not fully v4 compliant; LL invented a few ones for the first "special"
-// residents (e.g. Andrew Linden with a2e76fcd-9360-4f6d-a924-000000000010)
+// Also note that _some_ UUIDs are not fully v4 compliant; LL invented a few ones for the first "special" residents
 func isValidUUID(u string) bool {
 	_, err := uuid.Parse(u)
 	return err == nil
