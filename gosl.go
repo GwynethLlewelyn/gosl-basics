@@ -400,7 +400,8 @@ func main() {
 			if err != nil || checkInput == "quit" { // io.EOF
 				break
 			}
-			checkInput = strings.TrimRight(checkInput, "\r\n")
+			// It's better to also trim spaces at the beginning, too.
+			checkInput = strings.TrimSpace(checkInput)
 			// fmt.Printf("Ok, got %s length is %d and UUID is %v\n", checkInput, len(checkInput), isValidUUID(checkInput))
 			if (len(checkInput) == 36) && isValidUUID(checkInput) {
 				avatarName, gridName = searchKVUUID(checkInput)
